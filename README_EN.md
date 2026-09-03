@@ -24,22 +24,28 @@ npm install
 npm run dev        # http://localhost:5199
 ```
 
-## Deployment
+## Pages Deployment
 
-Clone this project:
+- Clone this project:
 
-```
-git git clone https://github.com/CelestialDomeStarPole/WallpaperEngine-PKG-Extractor-Web.git
-```
+  ```
+  git git clone https://github.com/CelestialDomeStarPole/WallpaperEngine-PKG-Extractor-Web.git
+  ```
 
-Run in the project root directory:
+  Run in the project root directory:
 
-```bash
-npm run build
-```
+  ```bash
+  npm run build
+  ```
 
-The output is in `dist/`. Upload `dist/` to GitHub Pages / Cloudflare Pages / any static hosting — no backend, no network requests required.  
-Alternatively, upload the project to Cloudflare Workers for automatic builds.
+  The output is in `dist/`. Upload `dist/` to GitHub Pages / Cloudflare Pages / any static hosting — no backend, no network requests required.
+
+- Or fork this project: connect your Cloudflare account and select the forked repository for **Pages** deployment.
+
+## Workers Deployment
+
+- Clone this project and upload the folder to Cloudflare Workers, deploying with the default options.
+- Or fork this project: connect your Cloudflare account and select the forked repository for **Workers** deployment.
 
 ## Roadmap
 

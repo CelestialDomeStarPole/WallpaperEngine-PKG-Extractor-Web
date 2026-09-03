@@ -24,22 +24,29 @@ npm install
 npm run dev        # http://localhost:5199
 ```
 
-## 部署
+## Pages部署
 
-克隆此项目
+- 克隆此项目
 
-```
-git git clone https://github.com/CelestialDomeStarPole/WallpaperEngine-PKG-Extractor-Web.git
-```
+  ```
+  git git clone https://github.com/CelestialDomeStarPole/WallpaperEngine-PKG-Extractor-Web.git
+  ```
 
-在项目根目录下执行
+  在项目根目录下执行
 
-```bash
-npm run build
-```
+  ```bash
+  npm run build
+  ```
 
-产物在 `dist/`，将 `dist/` 上传到 GitHub Pages / Cloudflare Pages / 任意静态托管即可，无后端、无网络请求。  
-或将项目上传至Cloudflare Workers 自动构建
+  产物在 `dist/`，将 `dist/` 上传到 GitHub Pages / Cloudflare Pages / 任意静态托管即可，无后端、无网络请求。
+
+- 或者fork此项目
+  Cloudflare 链接你的账户并选择fork后的仓库进行**Pages**部署
+
+## Workers部署
+
+- 克隆此项目并将文件夹上传至 Cloudflare Workers 保持默认选项部署
+- 或者fork此项目 Cloudflare 链接你的账户并选择fork后的仓库进行**workers**部署
 
 ## 未来
 
