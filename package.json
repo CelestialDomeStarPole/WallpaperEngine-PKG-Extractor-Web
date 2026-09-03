@@ -1,5 +1,5 @@
 {
-  "name": "wallpaper-engine/pkg-extract",
+  "name": "wallpaper-engine-pkg-extract",
   "private": true,
   "version": "0.1.0",
   "type": "module",
