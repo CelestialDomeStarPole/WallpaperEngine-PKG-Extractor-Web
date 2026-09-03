@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wallpaper Engine PKG 提取器</title>
+</head>
+<body>
+  <header>
+    <h1>WE PKG 提取器</h1>
+    <p class="sub">纯浏览器本地解析 .pkg 壁纸包 · 文件不会上传</p>
+  </header>
+  <main>
+    <section id="dropzone" class="dropzone">
+      <div class="dz-inner">
+        <p>拖入 <code>.pkg</code> 文件，或</p>
+        <label class="btn">
+          选择文件
+          <input type="file" id="file-input" accept=".pkg" hidden />
+        </label>
+        <p id="status" class="status"></p>
+      </div>
+    </section>
+
+    <section id="meta-card" class="meta-card" hidden></section>
+
+    <section id="options" class="options" hidden>
+      <label><input type="checkbox" id="opt-tex" checked /> .tex 转换为图片/视频</label>
+      <label><input type="checkbox" id="opt-keep-path" checked /> 保留目录结构</label>
+      <span class="filter">
+        筛选：
+        <select id="opt-filter">
+          <option value="all">全部</option>
+          <option value="image">只要图片</option>
+          <option value="video">只要视频</option>
+          <option value="json">只要 JSON</option>
+        </select>
+      </span>
+      <button id="btn-zip" class="btn primary">打包下载 ZIP</button>
+    </section>
+
+    <section id="result" hidden>
+      <div id="grid" class="grid"></div>
+    </section>
+  </main>
+  <footer>
+    <p>明文 PKGV 格式 · 支持 jpg / png / mp4 / webm / tex 解码 · Workshop 加密包后续支持</p>
+  </footer>
+  <div id="modal" class="modal" hidden><div class="modal-body"><button class="modal-close" id="modal-close">×</button><div id="modal-content"></div></div></div>
+  <script type="module" src="/src/ui/main.ts"></script>
+</body>
+</html>
