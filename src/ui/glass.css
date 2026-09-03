@@ -1,0 +1,100 @@
+/* 液态玻璃材质层：token + .glass 基元。改材质只动这个文件。 */
+
+:root {
+  color-scheme: dark;
+
+  /* 可读性基底：壁纸由 JS 取样亮度后覆写 --lg-scrim */
+  --lg-scrim: 0.46;
+  --lg-blur: 24px;
+  --lg-sat: 175%;
+  --lg-bright: 1.05;
+
+  --lg-tint-top: rgba(255, 255, 255, 0.11);
+  --lg-tint-bottom: rgba(10, 16, 24, 0.34);
+  --lg-spec: rgba(255, 255, 255, 0.22);
+  --lg-hairline: rgba(255, 255, 255, 0.28);
+  --lg-inner-top: rgba(255, 255, 255, 0.36);
+  --lg-inner-bottom: rgba(255, 255, 255, 0.07);
+  --lg-shadow: 0 24px 50px -18px rgba(2, 6, 12, 0.62), 0 2px 8px rgba(2, 6, 12, 0.26);
+  --lg-glow: rgba(124, 196, 255, 0.55);
+
+  --lg-r: 20px;
+  --lg-r-sm: 14px;
+  --lg-r-pill: 999px;
+
+  /* 折射位移图 id 由各元素内联写入；空替换时整条声明依然合法 → 自动退回纯 CSS 玻璃 */
+  --lg-refract: ;
+
+  --dur: 0.22s;
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.glass {
+  position: relative;
+  border-radius: var(--lg-r);
+  border: 1px solid var(--lg-hairline);
+  background:
+    linear-gradient(180deg, var(--lg-tint-top), var(--lg-tint-bottom)),
+    radial-gradient(130% 90% at 50% -30%, rgba(255, 255, 255, 0.16), transparent 62%);
+  box-shadow:
+    inset 0 1px 0 var(--lg-inner-top),
+    inset 0 -1px 0 var(--lg-inner-bottom),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    var(--lg-shadow);
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-sat)) brightness(var(--lg-bright)) var(--lg-refract, );
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-sat)) brightness(var(--lg-bright));
+  isolation: isolate;
+}
+
+/* 细噪点：消掉大面积渐变的色带，让玻璃有实体感 */
+.glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.glass > * { position: relative; z-index: 1; }
+
+/* 顶部高光扫过：只给按钮/悬浮面板等小面积元素用 */
+.lg-sheen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(168deg, var(--lg-spec), transparent 46%);
+  opacity: 0.75;
+}
+
+.lg-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* 动效关闭时统一收拢在这里，一处开关 */
+body:not(.motion-off) .glass,
+body:not(.motion-off) .btn,
+body:not(.motion-off) .card,
+body:not(.motion-off) .folder,
+body:not(.motion-off) .bg-scrim,
+body:not(.motion-off) .bg img,
+body:not(.motion-off) .switch-track,
+body:not(.motion-off) .pager button,
+body:not(.motion-off) .crumbs button {
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    background-color var(--dur) var(--ease),
+    transform var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass, .btn, .card, .folder, .bg img, .switch-track, .pager button, .crumbs button {
+    transition: none !important;
+  }
+}
