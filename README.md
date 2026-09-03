@@ -1,4 +1,8 @@
+<div align="center">
+
 # Wallpaper Engine PKG 提取器 Web
+
+</div>
 
 在**用户浏览器本地**解析 Wallpaper Engine 的 `.pkg` 壁纸包，提取 jpg / png / mp4 / webm 及包内任意资源；支持 `.tex` 解码转换；一切行为均在本地进行，与网站服务器无关，可静态部署。[示例网站](https://pkg.cdsp.us.ci)
 
