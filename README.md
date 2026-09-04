@@ -43,10 +43,28 @@ npm run dev        # http://localhost:5199
 - 或者fork此项目
   Cloudflare 链接你的账户并选择fork后的仓库进行**Pages**部署
 
+### CF Pages 构建配置设置
+
+| 类别 | 内容 |  
+| :--- | :--- |  
+| 框架预设 | 无 |  
+| 构建命令 | `npm run build` |  
+| 输出目录 | `dist` |  
+| 根目录 | 留空 |  
+
 ## Workers部署
 
 - 克隆此项目并将文件夹上传至 Cloudflare Workers 保持默认选项部署
 - 或者fork此项目 Cloudflare 链接你的账户并选择fork后的仓库进行**workers**部署
+
+### CF Wokers 构建配置设置
+
+| 类别 | 内容 |  
+| :--- | :--- |  
+| 构建命令 | `npm run build` |  
+| 部署命令 | `npx wrangler deploy` |  
+| 版本命令 | `npx wrangler versions upload` |  
+| 根目录 | `/` |  
 
 ## 未来
 

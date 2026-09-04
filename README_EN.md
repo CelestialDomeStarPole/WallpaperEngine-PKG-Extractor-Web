@@ -42,10 +42,28 @@ npm run dev        # http://localhost:5199
 
 - Or fork this project: connect your Cloudflare account and select the forked repository for **Pages** deployment.
 
+### CF Pages Build Configuration
+
+| Category | Value |
+| :--- | :--- |
+| Framework preset | None |
+| Build command | `npm run build` |
+| Output directory | `dist` |
+| Root directory | Leave empty |
+
 ## Workers Deployment
 
 - Clone this project and upload the folder to Cloudflare Workers, deploying with the default options.
 - Or fork this project: connect your Cloudflare account and select the forked repository for **Workers** deployment.
+
+### CF Workers Build Configuration
+
+| Category | Value |
+| :--- | :--- |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| Version command | `npx wrangler versions upload` |
+| Root directory | `/` |
 
 ## Roadmap
 
