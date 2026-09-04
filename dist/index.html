@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0a1018" />
+  <title>Wallpaper Engine PKG 提取器</title>
+  <script type="module" crossorigin src="./assets/index-CBPyE914.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-B5b7SXIw.css">
+</head>
+<body>
+  <div class="bg" aria-hidden="true"><img id="bg-img" alt="" /></div>
+  <div class="bg-scrim" aria-hidden="true"></div>
+  <svg id="lg-defs" class="lg-defs" aria-hidden="true" focusable="false"><defs></defs></svg>
+
+  <div class="app">
+    <div class="shell">
+      <header class="masthead glass">
+        <div class="masthead-text">
+          <h1>WE PKG 提取器</h1>
+          <p class="sub">纯浏览器本地解析 .pkg 壁纸包 · 文件不会上传</p>
+        </div>
+        <p class="badge">PKG<span>V</span></p>
+      </header>
+    </div>
+
+    <main class="shell">
+      <section id="dropzone" class="dropzone glass">
+        <div class="dz-inner">
+          <p class="dz-lead">拖入 <code>.pkg</code> 文件，或</p>
+          <label class="btn lg-sheen">
+            选择文件
+            <input type="file" id="file-input" accept=".pkg" hidden />
+          </label>
+          <p id="status" class="status"></p>
+        </div>
+      </section>
+
+      <div class="progress" id="progress" hidden>
+        <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
+        <span class="progress-text" id="progress-text"></span>
+      </div>
+
+      <section id="meta-card" class="meta-card glass" hidden></section>
+
+      <section id="options" class="options glass" hidden>
+        <label class="switch">
+          <input type="checkbox" id="opt-tex" checked />
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>.tex 转换为图片/视频</span>
+        </label>
+        <label class="switch">
+          <input type="checkbox" id="opt-keep-path" checked />
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>保留目录结构</span>
+        </label>
+        <label class="field">
+          <span class="field-label">打包范围</span>
+          <select id="opt-zip-scope"></select>
+        </label>
+        <button id="btn-zip" class="btn primary lg-sheen">打包下载 ZIP</button>
+      </section>
+
+      <section id="result" hidden>
+        <nav id="crumbs" class="crumbs glass" aria-label="文件夹路径" hidden></nav>
+        <div id="grid" class="grid"></div>
+        <nav id="pager" class="pager glass" aria-label="分页" hidden></nav>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <p>明文 PKGV 格式 · 支持 jpg / png / mp4 / webm / tex 解码 · Workshop 加密包后续支持</p>
+    </footer>
+  </div>
+
+  <section id="dock" class="dock glass" aria-label="界面设置">
+    <button id="dock-toggle" class="dock-toggle" aria-expanded="false" aria-controls="dock-body">
+      <span class="dock-toggle-icon" aria-hidden="true"></span>
+      <span>外观</span>
+    </button>
+    <div id="dock-body" class="dock-body" hidden>
+      <div class="dock-group">
+        <p class="dock-label">壁纸</p>
+        <div class="bg-nav">
+          <div id="bg-list" class="bg-list" role="group" aria-label="选择壁纸"></div>
+          <div class="bg-arrows">
+            <button id="bg-prev" class="bg-arrow" type="button" aria-label="上一张壁纸">‹</button>
+            <button id="bg-next" class="bg-arrow" type="button" aria-label="下一张壁纸">›</button>
+          </div>
+        </div>
+        <label class="field field-block">
+          <span class="field-label">自定义壁纸 URL</span>
+          <input type="url" id="set-custom" placeholder="https://…" />
+        </label>
+      </div>
+      <label class="dock-slider">
+        <span class="dock-label">暗度 <button id="set-scrim-auto" class="dock-reset" type="button" title="恢复按壁纸亮度自动">自动</button></span>
+        <input type="range" id="set-scrim" min="0" max="88" step="1" />
+      </label>
+      <label class="dock-slider">
+        <span class="dock-label">磨砂强度</span>
+        <input type="range" id="set-blur" min="0" max="40" step="1" />
+      </label>
+      <div class="dock-group dock-switches">
+        <label class="switch">
+          <input type="checkbox" id="set-refract" />
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>边缘折射</span>
+        </label>
+        <label class="switch">
+          <input type="checkbox" id="set-motion" checked />
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>动效</span>
+        </label>
+      </div>
+      <p class="dock-note" id="dock-note"></p>
+    </div>
+  </section>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-body glass">
+      <button class="modal-close" id="modal-close" aria-label="关闭">×</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+</body>
+</html>
