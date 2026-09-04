@@ -33,7 +33,7 @@ body {
 .bg img.ready { opacity: 1; }
 .bg::after {
   content: ''; position: absolute; inset: 0;
-  background: radial-gradient(120% 100% at 50% 0%, transparent 45%, rgba(3, 7, 12, 0.5) 100%);
+  background: radial-gradient(120% 100% at 50% 0%, transparent 45%, rgba(3, 7, 12, calc(var(--lg-scrim) * 0.55)) 100%);
 }
 .bg-scrim {
   z-index: -1;

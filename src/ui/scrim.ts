@@ -1,8 +1,8 @@
 import { wallpapers, randomWallpaper, type Wallpaper } from './wallpapers';
 
 const SAMPLE_EDGE = 32;
-/** 暗壁纸不需要太重的遮罩，否则整页发死 */
-const SCRIM_MIN = 0.28;
+/** 够暗的壁纸本身就有对比度，不需要保底遮罩；下限交给对比度公式决定 */
+const SCRIM_MIN = 0;
 const SCRIM_MAX = 0.88;
 /** 正文色 #f3f8ff 的相对亮度与目标对比度：留足余量，让次级文字也过 AA */
 const TEXT_LUMINANCE = 0.937;
