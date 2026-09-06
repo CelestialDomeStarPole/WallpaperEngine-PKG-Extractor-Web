@@ -93,8 +93,17 @@ body:not(.motion-off) .crumbs button {
     opacity var(--dur) var(--ease);
 }
 
+body:not(.motion-off) .gh-link {
+  transition:
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    background-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .glass, .btn, .card, .folder, .bg img, .switch-track, .pager button, .crumbs button {
+  .glass, .btn, .card, .folder, .bg img, .switch-track, .pager button, .crumbs button, .gh-link {
     transition: none !important;
   }
 }
