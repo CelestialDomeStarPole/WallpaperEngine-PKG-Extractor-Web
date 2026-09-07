@@ -71,6 +71,16 @@
       </section>
 
       <section id="result" hidden>
+        <div id="selbar" class="selbar" hidden>
+          <p id="sel-summary" class="sel-summary" aria-live="polite"></p>
+          <p id="sel-hint" class="sel-hint" hidden></p>
+          <div class="sel-actions">
+            <button id="btn-sel-all" class="btn small" type="button"></button>
+            <button id="btn-sel-clear" class="btn small" type="button">清空</button>
+            <button id="btn-sel-zip" class="btn small primary lg-sheen" type="button">选中文件打包下载</button>
+            <button id="btn-sel-dl" class="btn small" type="button">选中文件一键下载</button>
+          </div>
+        </div>
         <nav id="crumbs" class="crumbs glass" aria-label="文件夹路径" hidden></nav>
         <div id="grid" class="grid"></div>
         <nav id="pager" class="pager glass" aria-label="分页" hidden></nav>

@@ -38,6 +38,14 @@ const pager = $<HTMLElement>('#pager');
 const modal = $<HTMLElement>('#modal');
 const modalContent = $<HTMLElement>('#modal-content');
 const zipScope = $<HTMLSelectElement>('#opt-zip-scope');
+const zipBtn = $<HTMLButtonElement>('#btn-zip');
+const selbar = $<HTMLElement>('#selbar');
+const selSummary = $<HTMLElement>('#sel-summary');
+const selHint = $<HTMLElement>('#sel-hint');
+const selAll = $<HTMLButtonElement>('#btn-sel-all');
+const selClear = $<HTMLButtonElement>('#btn-sel-clear');
+const selZip = $<HTMLButtonElement>('#btn-sel-zip');
+const selDl = $<HTMLButtonElement>('#btn-sel-dl');
 
 const defs = document.querySelector<SVGDefsElement>('#lg-defs defs')!;
 const glass = createGlassController(defs);
@@ -51,19 +59,45 @@ let view: View = { name: 'folders' };
 let renderToken = 0;
 const blobCache = new Map<number, Blob>();
 const objectUrls = new Map<number, string>();
-const pending = new Map<number, (b: Blob) => void>();
+const pending = new Map<number, { ok: (b: Blob) => void; no: (e: Error) => void }>();
+
+/** 超过这个数量还逐个下载就是自找麻烦，提示改用打包 */
+const BATCH_HINT = 20;
+const selected = new Set<number>();
+let byId = new Map<number, ItemSummary>();
+/** 换包或重新解析后自增：批量循环据此判断条目身份已失效 */
+let parseEpoch = 0;
+let running = false;
+let runLabel = '';
+
+/** 让所有还在等 blob 的调用方以错误收尾，否则批量循环会永久卡住 */
+function rejectPending(reason: string) {
+  for (const { no } of pending.values()) no(new Error(reason));
+  pending.clear();
+}
 
 worker.onmessage = (ev: MessageEvent<OutMsg>) => {
   const msg = ev.data;
   if (msg.type === 'error') {
+    rejectPending('解析出错');
     progress.hide();
+    runLabel = '';
+    running = false;
+    renderSelbar();
     setStatus(msg.message, 'err');
     return;
   }
   if (msg.type === 'parsed') {
+    rejectPending('条目已重新编号');
     releaseObjectUrls();
     blobCache.clear();
     currentItems = msg.items;
+    byId = new Map(msg.items.map((i) => [i.id, i]));
+    // id 按产出条目重新分配，切换 .tex 转换还会改变条目总数，旧选中一律作废
+    selected.clear();
+    parseEpoch += 1;
+    running = false;
+    runLabel = '';
     view = { name: 'folders' };
     setStatus(`解析成功：${msg.items.length} 个条目（${msg.magic}）`, 'ok');
     optionsBar.hidden = false;
@@ -72,13 +106,15 @@ worker.onmessage = (ev: MessageEvent<OutMsg>) => {
     renderMeta(msg.meta, msg.items);
     fillZipScope();
     render();
+    renderSelbar();
     return;
   }
   if (msg.type === 'blob') {
     const blob = new Blob([msg.bytes as unknown as BlobPart], { type: msg.mime });
     blobCache.set(msg.id, blob);
-    pending.get(msg.id)?.(blob);
+    const waiter = pending.get(msg.id);
     pending.delete(msg.id);
+    waiter?.ok(blob);
   }
 };
 
@@ -94,8 +130,8 @@ function currentOptions(): DecodeOptions {
 function requestBlob(id: number): Promise<Blob> {
   const cached = blobCache.get(id);
   if (cached) return Promise.resolve(cached);
-  return new Promise((resolve) => {
-    pending.set(id, resolve);
+  return new Promise((resolve, reject) => {
+    pending.set(id, { ok: resolve, no: reject });
     worker.postMessage({ type: 'blob', id });
   });
 }
@@ -112,6 +148,101 @@ async function previewUrl(id: number): Promise<string> {
 function releaseObjectUrls() {
   for (const url of objectUrls.values()) URL.revokeObjectURL(url);
   objectUrls.clear();
+}
+
+// —— 多选 ——
+const selectedItems = () => currentItems.filter((i) => selected.has(i.id));
+
+/** 「全选本类」的目标：文件夹视图内＝该类全部条目（跨页），上层＝全部 */
+function scopeItemsToSelect(): ItemSummary[] {
+  if (view.name !== 'folder') return currentItems;
+  const kind = view.kind;
+  return currentItems.filter((i) => i.kind === kind);
+}
+
+/** 只改可见卡片的 class 与勾选框，不重建 DOM：重建会重新拉一遍缩略图并触发折射重算 */
+function paintSelection() {
+  for (const card of grid.querySelectorAll<HTMLElement>('.card[data-id]')) {
+    const on = selected.has(Number(card.dataset.id));
+    card.classList.toggle('selected', on);
+    const box = card.querySelector<HTMLInputElement>('.card-check');
+    if (box) box.checked = on;
+  }
+}
+
+function setSelection(id: number, on: boolean) {
+  if (!byId.has(id) || selected.has(id) === on) return;
+  if (on) selected.add(id);
+  else selected.delete(id);
+  paintSelection();
+  renderSelbar();
+}
+
+function setMany(items: ItemSummary[], on: boolean) {
+  for (const i of items) {
+    if (on) selected.add(i.id);
+    else selected.delete(i.id);
+  }
+  paintSelection();
+  renderSelbar();
+}
+
+function renderSelbar() {
+  const n = selected.size;
+  selbar.hidden = n === 0 && !runLabel;
+  if (runLabel) {
+    selSummary.innerHTML = n
+      ? `${selKindText(n)}<span class="sep">·</span><span class="sel-state">${esc(runLabel)}</span>`
+      : `<span class="sel-state">${esc(runLabel)}</span>`;
+  } else {
+    selSummary.innerHTML = n ? selKindText(n) : '';
+  }
+  selHint.hidden = n <= BATCH_HINT;
+  selHint.textContent = `已选 ${n} 个：逐个下载需要浏览器允许「下载多个文件」，每个文件还会完整解码进内存，建议改用打包下载。`;
+
+  const scope = scopeItemsToSelect();
+  const pendingCount = scope.filter((i) => !selected.has(i.id)).length;
+  selAll.textContent = `${view.name === 'folder' ? '全选本类' : '全选全部'}（${scope.length}）`;
+  selAll.disabled = running || !pendingCount;
+  selClear.disabled = running || !n;
+  selZip.disabled = running || !n;
+  selDl.disabled = running || !n;
+  zipBtn.disabled = running;
+}
+
+function selKindText(n: number): string {
+  const counts = new Map<ItemKind, number>();
+  for (const i of currentItems) {
+    if (selected.has(i.id)) counts.set(i.kind, (counts.get(i.kind) ?? 0) + 1);
+  }
+  const parts = [`已选<b>${n}</b>个`];
+  for (const g of GROUP_ORDER) {
+    const c = counts.get(g.kind);
+    if (c) parts.push(`${g.label}<b>${c}</b>`);
+  }
+  return parts.join('<span class="sep" aria-hidden="true">·</span>');
+}
+
+function setRunState(text: string) {
+  runLabel = text;
+  renderSelbar();
+}
+
+/** 三个下载入口共用一把锁：并行跑会互相踩进度条，还会同时存两个文件 */
+function beginRun(): boolean {
+  if (running) {
+    setStatus('已有下载任务在进行中，请稍候', 'err');
+    return false;
+  }
+  running = true;
+  renderSelbar();
+  return true;
+}
+
+function endRun() {
+  running = false;
+  runLabel = '';
+  renderSelbar();
 }
 
 // —— 拖拽 / 选择 ——
@@ -189,6 +320,7 @@ function render() {
   if (view.name === 'folders') renderFolders();
   else renderFolderContents(view.kind, view.page);
   glass.observe(grid);
+  renderSelbar();
 }
 
 function renderFolders() {
@@ -241,18 +373,21 @@ function renderFolderContents(kind: ItemKind, page: number) {
   renderCrumbs(group);
   grid.innerHTML = '';
   for (const item of group.items.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)) {
+    const on = selected.has(item.id);
+    const media = item.kind === 'image' || item.kind === 'video';
     const card = document.createElement('div');
-    card.className = 'card glass';
+    card.className = `card glass${on ? ' selected' : ''}`;
     card.dataset.id = String(item.id);
     card.innerHTML = `
-      <div class="thumb" data-thumb="${item.id}">${item.kind === 'image' || item.kind === 'video' ? '' : `<span style="font-size:16px">${groupIcon(item.kind)}</span>`}</div>
+      <input class="card-check" type="checkbox" ${on ? 'checked' : ''} aria-label="选中 ${esc(item.name)}" />
+      <div class="thumb" data-slot="${item.id}">${media ? '' : `<span style="font-size:16px">${groupIcon(item.kind)}</span>`}</div>
       <div class="info">
         <div class="name" title="${esc(item.sourcePath)}">${esc(item.name)}</div>
         <div class="meta"><span>${esc(item.kind)}</span><span>${fmtSize(item.bytes)}</span></div>
         ${item.warning ? `<div class="warn">${esc(item.warning)}</div>` : ''}
         <div class="actions">
           <button class="btn small" data-download="${item.id}">下载</button>
-          ${item.kind === 'image' || item.kind === 'video' ? `<button class="btn small" data-open="${item.id}">查看</button>` : ''}
+          <button class="btn small" data-open="${item.id}">查看</button>
         </div>
       </div>`;
     grid.append(card);
@@ -300,16 +435,20 @@ function renderPager(page: number, pageCount: number) {
 /** 只取当前可见的缩略图：卡片每页最多 PAGE_SIZE 个，文件夹页最多 4 个 */
 async function loadThumbs() {
   const token = ++renderToken;
-  const slots = [...grid.querySelectorAll<HTMLElement>('[data-slot]'), ...grid.querySelectorAll<HTMLElement>('[data-thumb]')]
-    .filter((el) => el.dataset.slot || el.dataset.thumb);
-  for (const slot of slots) {
-    const id = Number(slot.dataset.slot ?? slot.dataset.thumb);
-    if (!Number.isFinite(id)) continue;
-    const url = await previewUrl(id);
+  for (const slot of grid.querySelectorAll<HTMLElement>('[data-slot]')) {
+    const id = Number(slot.dataset.slot);
+    const item = byId.get(id);
+    // JSON / 其他 没有可视缩略图，连解码都不该发起
+    if (!item || (item.kind !== 'image' && item.kind !== 'video')) continue;
+    let url: string;
+    try {
+      url = await previewUrl(id);
+    } catch {
+      continue;
+    }
     if (token !== renderToken || !slot.isConnected) continue;
-    const item = currentItems.find((i) => i.id === id);
     slot.innerHTML = '';
-    if (item?.kind === 'video') {
+    if (item.kind === 'video') {
       const video = document.createElement('video');
       video.src = url;
       video.muted = true;
@@ -318,7 +457,7 @@ async function loadThumbs() {
     } else {
       const img = document.createElement('img');
       img.src = url;
-      img.alt = item?.name ?? '';
+      img.alt = item.name;
       img.loading = 'lazy';
       slot.append(img);
     }
@@ -333,12 +472,27 @@ grid.addEventListener('click', (e) => {
     render();
     return;
   }
-  const dl = t.dataset?.download;
-  const open = t.dataset?.open;
-  const thumb = t.dataset?.thumb;
-  if (dl) void downloadItem(Number(dl));
-  else if (open) void openItem(Number(open));
-  else if (thumb) void openItem(Number(thumb));
+  const action = t.closest<HTMLElement>('[data-download], [data-open]');
+  if (action) {
+    const id = Number(action.dataset.download ?? action.dataset.open);
+    if (action.dataset.download) void downloadItem(id);
+    else void openItem(id);
+    return;
+  }
+  // 勾选框的原生 change 已经处理过了，这里再取反等于没点
+  if (t.closest('.card-check')) return;
+  const card = t.closest<HTMLElement>('.card[data-id]');
+  if (card) {
+    const id = Number(card.dataset.id);
+    setSelection(id, !selected.has(id));
+  }
+});
+
+grid.addEventListener('change', (e) => {
+  const box = (e.target as HTMLElement).closest<HTMLInputElement>('.card-check');
+  if (!box) return;
+  const id = Number(box.closest<HTMLElement>('.card[data-id]')?.dataset.id);
+  if (Number.isFinite(id)) setSelection(id, box.checked);
 });
 
 crumbs.addEventListener('click', (e) => {
@@ -378,29 +532,33 @@ function isTyping(target: EventTarget | null): boolean {
 }
 
 async function openItem(id: number) {
-  const item = currentItems.find((i) => i.id === id);
+  const item = byId.get(id);
   if (!item) return;
-  const url = await previewUrl(id);
-  modalContent.innerHTML = '';
-  if (item.kind === 'image') {
-    const img = document.createElement('img');
-    img.src = url;
-    modalContent.append(img);
-  } else if (item.kind === 'video') {
-    const video = document.createElement('video');
-    video.src = url;
-    video.controls = true;
-    video.autoplay = true;
-    modalContent.append(video);
-  } else {
-    const blob = await requestBlob(id);
-    const text = await blob.text();
-    const pre = document.createElement('pre');
-    pre.textContent = text.slice(0, 200_000);
-    modalContent.append(pre);
+  try {
+    const url = await previewUrl(id);
+    modalContent.innerHTML = '';
+    if (item.kind === 'image') {
+      const img = document.createElement('img');
+      img.src = url;
+      modalContent.append(img);
+    } else if (item.kind === 'video') {
+      const video = document.createElement('video');
+      video.src = url;
+      video.controls = true;
+      video.autoplay = true;
+      modalContent.append(video);
+    } else {
+      const blob = await requestBlob(id);
+      const text = await blob.text();
+      const pre = document.createElement('pre');
+      pre.textContent = text.slice(0, 200_000);
+      modalContent.append(pre);
+    }
+    modal.hidden = false;
+    glass.observe(modal);
+  } catch (e) {
+    setStatus(`预览失败：${(e as Error).message}`, 'err');
   }
-  modal.hidden = false;
-  glass.observe(modal);
 }
 
 function closeModal() {
@@ -424,12 +582,15 @@ function saveBlob(blob: Blob, name: string) {
 }
 
 async function downloadItem(id: number) {
-  const item = currentItems.find((i) => i.id === id);
+  const item = byId.get(id);
   if (!item) return;
   setStatus(`正在导出 ${item.name} …`);
-  const blob = await requestBlob(id);
-  saveBlob(blob, item.name);
-  setStatus('导出完成', 'ok');
+  try {
+    saveBlob(await requestBlob(id), item.name);
+    setStatus('导出完成', 'ok');
+  } catch (e) {
+    setStatus(`导出失败：${(e as Error).message}`, 'err');
+  }
 }
 
 function fillZipScope() {
@@ -445,40 +606,139 @@ function scopeItems(): ItemSummary[] {
   return currentItems.filter((i) => i.kind === scope);
 }
 
-/** 不用 rAF 让步：后台标签页里 rAF 不触发，打包会永久卡住 */
+const entryName = (item: ItemSummary, keepPath: boolean) =>
+  keepPath ? item.name : item.name.split('/').pop() || 'download';
+
+/** 关闭「保留目录结构」后不同目录的同名条目会撞成同一个 key，撞了就加序号，别静默覆盖 */
+function uniqueKey(want: string, used: Set<string>): string {
+  if (!used.has(want)) { used.add(want); return want; }
+  const dot = want.lastIndexOf('.');
+  let n = 2;
+  let key = '';
+  do {
+    key = dot > 0 ? `${want.slice(0, dot)}-${n}${want.slice(dot)}` : `${want}-${n}`;
+    n += 1;
+  } while (used.has(key));
+  used.add(key);
+  return key;
+}
+
+/** 不用 rAF 让步：后台标签页里 rAF 不触发，批量循环会永久卡住 */
 const yieldToUI = () => new Promise<void>((r) => setTimeout(r, 0));
 
-$<HTMLButtonElement>('#btn-zip').addEventListener('click', async () => {
-  const items = scopeItems();
+function abortIfStale(epoch: number): boolean {
+  if (epoch === parseEpoch) return false;
+  progress.hide();
+  endRun();
+  setStatus('已中止：包内容已变化', 'err');
+  return true;
+}
+
+/** 打包给定条目：#btn-zip 与「选中文件打包下载」共用同一条流水线 */
+async function zipItems(items: ItemSummary[]) {
   if (!items.length) {
     setStatus('没有可打包的文件', 'err');
     return;
   }
+  if (!beginRun()) return;
+  const epoch = parseEpoch;
   const keepPath = ($<HTMLInputElement>('#opt-keep-path')).checked;
   setStatus(`正在打包 ${items.length} 个文件…`);
   progress.start('正在解码…', items.length);
   const files: Record<string, Uint8Array> = {};
+  const used = new Set<string>();
   let done = 0;
+  let skipped = 0;
+  let renamed = 0;
   for (const item of items) {
-    const blob = await requestBlob(item.id);
-    files[keepPath ? item.name : item.name.split('/').pop()!] = new Uint8Array(await blob.arrayBuffer());
+    if (abortIfStale(epoch)) return;
+    try {
+      const want = entryName(item, keepPath);
+      const key = uniqueKey(want, used);
+      if (key !== want) renamed += 1;
+      const blob = await requestBlob(item.id);
+      files[key] = new Uint8Array(await blob.arrayBuffer());
+      // 打包时每个 id 只用一次，留在 blobCache 里纯属白占内存
+      blobCache.delete(item.id);
+    } catch {
+      skipped += 1;
+    }
     done += 1;
     progress.set(done);
+    setRunState(`已处理 ${done}/${items.length}`);
     if (done % 5 === 0) await yieldToUI();
   }
+  if (!Object.keys(files).length) {
+    progress.hide();
+    endRun();
+    setStatus(`打包失败：${skipped} 个条目全部解码失败`, 'err');
+    return;
+  }
   progress.start('正在写入 ZIP…');
+  setRunState('正在写入 ZIP…');
   const { zip } = await import('fflate');
   zip(files, { level: 0 }, (err, data) => {
     if (err) {
       progress.hide();
+      endRun();
       setStatus(`ZIP 失败: ${err.message}`, 'err');
       return;
     }
+    const summary = [fmtSize(data.length), `${done} 个`, skipped ? `跳过 ${skipped} 个` : '', renamed ? `重命名 ${renamed} 个` : '']
+      .filter(Boolean)
+      .join(' · ');
     saveBlob(new Blob([data as unknown as BlobPart], { type: 'application/zip' }), 'wallpaper-extract.zip');
-    setStatus(`ZIP 完成（${fmtSize(data.length)}）`, 'ok');
-    progress.finish(`ZIP 完成 · ${fmtSize(data.length)}`);
+    setStatus(`ZIP 完成（${summary}）`, skipped ? 'err' : 'ok');
+    progress.finish(`ZIP 完成 · ${summary}`);
+    endRun();
   });
-});
+}
+
+/**
+ * 逐个触发浏览器下载。i/N 度量的是「解码 + 派发」而不是落盘：
+ * <a download> 没有完成事件，落盘由浏览器自己的下载条反映。
+ */
+async function downloadItems(items: ItemSummary[]) {
+  if (!items.length) {
+    setStatus('未选择任何文件', 'err');
+    return;
+  }
+  if (!beginRun()) return;
+  const epoch = parseEpoch;
+  progress.start('正在派发下载…', items.length);
+  let done = 0;
+  let dispatched = 0;
+  let fail = 0;
+  for (const item of items) {
+    if (abortIfStale(epoch)) return;
+    try {
+      const blob = await requestBlob(item.id);
+      saveBlob(blob, item.name);
+      dispatched += 1;
+      // 已经在预览里的条目留着，省得再解一次
+      if (!objectUrls.has(item.id)) blobCache.delete(item.id);
+    } catch {
+      fail += 1;
+    }
+    done += 1;
+    progress.set(done);
+    setRunState(`已派发 ${done}/${items.length}`);
+    // 每 3 个让一次路：既让进度条动，也不把 N 次点击挤进同一个 task
+    if (done % 3 === 0) await yieldToUI();
+  }
+  progress.finish(`已派发 ${dispatched} 个下载`);
+  setStatus(
+    `已派发 ${dispatched}/${items.length} 个下载${fail ? `，失败 ${fail} 个` : ''}。浏览器可能要求允许「下载多个文件」`,
+    fail || dispatched !== items.length ? 'err' : 'ok',
+  );
+  endRun();
+}
+
+zipBtn.addEventListener('click', () => void zipItems(scopeItems()));
+selZip.addEventListener('click', () => void zipItems(selectedItems()));
+selDl.addEventListener('click', () => void downloadItems(selectedItems()));
+selClear.addEventListener('click', () => setMany(currentItems, false));
+selAll.addEventListener('click', () => setMany(scopeItemsToSelect(), true));
 
 // —— 选项变化 ——
 $<HTMLElement>('#opt-tex').addEventListener('change', () => {
@@ -491,3 +751,4 @@ $<HTMLElement>('#opt-tex').addEventListener('change', () => {
 // —— 启动 ——
 glass.observe(document.body);
 dock.start();
+renderSelbar();

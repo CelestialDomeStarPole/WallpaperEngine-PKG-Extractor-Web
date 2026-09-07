@@ -164,6 +164,26 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .options { margin-top: 16px; display: flex; gap: 20px; align-items: center; flex-wrap: wrap; padding: 12px 20px; }
 .options .btn { margin-left: auto; }
 
+/* —— 多选栏：sticky 常驻，非 .glass（省下折射配额，也避免大面积常驻模糊） —— */
+.selbar {
+  position: sticky; top: 10px; z-index: 6; margin: 16px 0 0; padding: 9px 16px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border-radius: var(--lg-r-pill); border: 1px solid var(--accent);
+  background: rgba(8, 13, 20, 0.74);
+  box-shadow: 0 12px 28px -14px rgba(2, 6, 12, 0.85);
+  backdrop-filter: blur(12px) saturate(160%);
+}
+/* display:flex 会压过 [hidden] 的默认 display:none */
+.selbar[hidden] { display: none; }
+.sel-summary { margin: 0; flex: 1 1 auto; font-size: 13px; text-shadow: var(--ink-shadow); }
+.sel-summary .sep { color: var(--faint); margin: 0 6px; }
+.sel-kind { color: var(--muted); }
+.sel-kind b { color: var(--accent); font-weight: 700; margin-inline-start: 3px; font-variant-numeric: tabular-nums; }
+.sel-state { color: var(--accent); font-variant-numeric: tabular-nums; }
+.sel-hint { flex: 1 0 100%; margin: 0; font-size: 12px; color: var(--warn); }
+.sel-hint[hidden] { display: none; }
+.sel-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+
 /* —— 面包屑 —— */
 .crumbs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 16px; padding: 7px 12px; font-size: 13px; }
 .crumbs button {
@@ -178,9 +198,9 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .grid { margin-top: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); gap: 16px; }
 .grid--folders { grid-template-columns: repeat(auto-fill, minmax(266px, 1fr)); gap: 18px; margin-bottom: 4px; }
 
-.card { overflow: hidden; display: flex; flex-direction: column; }
+.card { position: relative; overflow: hidden; display: flex; flex-direction: column; cursor: pointer; user-select: none; }
 .card .thumb {
-  height: 136px; display: grid; place-items: center; cursor: zoom-in; overflow: hidden;
+  height: 136px; display: grid; place-items: center; cursor: inherit; overflow: hidden;
   background: rgba(5, 9, 15, 0.55); color: var(--faint); font-size: 26px;
 }
 .card .thumb img, .card .thumb video { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -190,6 +210,16 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .card .meta span:first-child { text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
 .card .warn { font-size: 12px; color: var(--warn); }
 .card .actions { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; }
+
+.card.selected { border-color: var(--accent); outline: 2px solid rgba(124, 196, 255, 0.55); outline-offset: 2px; }
+/* 必须是 .card 的直接子元素：.thumb 会被 loadThumbs 清空 innerHTML */
+.card > .card-check {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; opacity: 0;
+}
+.card:hover > .card-check, .card:focus-within > .card-check, .card.selected > .card-check { opacity: 1; }
+/* 触屏没有 hover，勾选框得常驻 */
+@media (hover: none) { .card > .card-check { opacity: 1; } }
 
 /* —— 文件夹卡 —— */
 .folder { overflow: hidden; display: flex; flex-direction: column; text-align: left; cursor: pointer; font: inherit; color: inherit; padding: 0; }
@@ -277,4 +307,7 @@ body:not(.motion-off) .folder:hover { transform: translateY(-2px); }
   .options { gap: 12px; padding: 12px 14px; }
   .options .btn { margin-left: 0; width: 100%; }
   .dock { left: 12px; right: 12px; width: auto; bottom: 12px; }
+  .selbar { top: 6px; padding: 10px 12px; }
+  .sel-actions { margin-left: 0; width: 100%; }
+  .sel-actions .btn { flex: 1 1 auto; }
 }
