@@ -209,6 +209,8 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .card .meta { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
 .card .meta span:first-child { text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
 .card .warn { font-size: 12px; color: var(--warn); }
+/* 动图体积是编码前的估算值：标出来，编码完成后会回填成精确值 */
+.card .size.est { color: var(--warn); font-variant-numeric: tabular-nums; }
 .card .actions { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; }
 
 .card.selected { border-color: var(--accent); outline: 2px solid rgba(124, 196, 255, 0.55); outline-offset: 2px; }
@@ -262,6 +264,13 @@ body:not(.motion-off) .folder:hover { transform: translateY(-2px); }
   background: linear-gradient(180deg, #b6e2ff, #58a7ee); color: #05131f; font-size: 18px; line-height: 1;
   box-shadow: 0 8px 20px -6px rgba(2, 6, 12, 0.7);
 }
+
+/* —— 告知弹窗 —— */
+.notice-body { width: min(560px, 88vw); padding: 22px 24px 18px; display: flex; flex-direction: column; gap: 12px; }
+.notice-body h2 { margin: 0; font-size: 16px; text-shadow: var(--ink-shadow); }
+.notice-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.6; }
+.notice-list li { word-break: break-all; }
+.notice-actions { display: flex; justify-content: flex-end; }
 
 /* —— 左下角设置 dock —— */
 .dock { position: fixed; left: 20px; bottom: 20px; z-index: 15; width: 292px; padding: 0; overflow: hidden; }

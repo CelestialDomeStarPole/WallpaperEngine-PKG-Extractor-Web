@@ -10,10 +10,12 @@ Parses Wallpaper Engine `.pkg` wallpaper packages **entirely in the user's brows
 
 ## Features
 
-- Drag & drop / file picker for `.pkg` files (≤200MB)
+- Drag & drop / file picker for `.pkg` files, up to roughly 2GB (parsing reads only the table of contents; the archive never sits in memory)
 - Entry list + image/video thumbnail previews + full-size modal viewer
 - Automatic `.tex → jpg/png/mp4` conversion (can be disabled; when disabled, `.tex` files are exported as-is)
-- Single file download / ZIP batch export preserving directory structure
+- Animated textures (`.tex` with a frame table) are re-encoded into a single **APNG** (lossless, keeps alpha) or **GIF** (256 colours, small), or both
+- Multi-select cards: bulk download the selection, or ZIP it
+- Single file download / streaming ZIP export preserving directory structure
 - Filtering (images/videos/JSON), `project.json` metadata card
 
 ## Development & Verification
@@ -53,7 +55,7 @@ npm run dev        # http://localhost:5199
 
 ## Workers Deployment
 
-- Clone this project and upload the folder to Cloudflare Workers, deploying with the default options.
+- Clone this project and upload the folder to Cloudflare Workers, then deploy.
 - Or fork this project: connect your Cloudflare account and select the forked repository for **Workers** deployment.
 
 ### CF Workers Build Configuration
@@ -68,7 +70,6 @@ npm run dev        # http://localhost:5199
 ## Roadmap
 
 - Encrypted PKG support
-- APNG/GIF re-encoding
 
 ## Format References
 
@@ -77,5 +78,7 @@ npm run dev        # http://localhost:5199
 
 ## Known Limitations
 
-- Animated GIF tex: first phase exports the first frame + all frames as PNG; no APNG/GIF re-encoding
-- No handling of special formats other than mp3 audio wallpapers; files >200MB are rejected
+- Workshop-encrypted packages (`PKG ` v1/v2) are not supported yet; planned for phase two
+- No audio/video formats beyond `.webm` / `.mp4`
+- PKGV stores entry offsets as int32, so a **package larger than 2GB cannot exist** in this format; such files are rejected outright
+- A single re-encoded animation larger than 200MB falls back to the first frame as PNG, with a dialog explaining why

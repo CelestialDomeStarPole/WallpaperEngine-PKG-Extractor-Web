@@ -1,17 +1,21 @@
 import './style.css';
-import type { DecodeOptions, ItemKind, WallpaperMeta } from '../core/types';
+import type { BlobVariant, DecodeOptions, ItemKind, WallpaperMeta } from '../core/types';
+import { LIMITS } from '../core/limits';
+import { ZipWriter, entryName, uniqueKey } from '../core/zipstream';
 import { createGlassController } from './glass';
 import { initDock } from './dock';
 import { createProgress } from './progress';
 
 interface ItemSummary {
   id: number; name: string; sourcePath: string; kind: ItemKind;
-  mime: string; bytes: number; warning?: string;
+  mime: string; bytes: number; estimated?: boolean; poster?: boolean; warning?: string;
 }
 type OutMsg =
   | { type: 'parsed'; magic: string; items: ItemSummary[]; meta?: WallpaperMeta }
   | { type: 'error'; message: string }
-  | { type: 'blob'; id: number; bytes: Uint8Array; name: string; mime: string };
+  | { type: 'blob'; id: number; variant: BlobVariant; blob: Blob; bytes: number; patch?: ItemPatch };
+
+interface ItemPatch { name: string; mime: string; kind: ItemKind; notice: string }
 
 interface Group { kind: ItemKind; label: string; items: ItemSummary[]; bytes: number }
 
@@ -38,6 +42,9 @@ const pager = $<HTMLElement>('#pager');
 const modal = $<HTMLElement>('#modal');
 const modalContent = $<HTMLElement>('#modal-content');
 const zipScope = $<HTMLSelectElement>('#opt-zip-scope');
+const optTex = $<HTMLInputElement>('#opt-tex');
+const animatedFormat = $<HTMLSelectElement>('#opt-animated');
+const animatedField = $<HTMLElement>('#field-animated');
 const zipBtn = $<HTMLButtonElement>('#btn-zip');
 const selbar = $<HTMLElement>('#selbar');
 const selSummary = $<HTMLElement>('#sel-summary');
@@ -46,6 +53,9 @@ const selAll = $<HTMLButtonElement>('#btn-sel-all');
 const selClear = $<HTMLButtonElement>('#btn-sel-clear');
 const selZip = $<HTMLButtonElement>('#btn-sel-zip');
 const selDl = $<HTMLButtonElement>('#btn-sel-dl');
+const notice = $<HTMLElement>('#notice');
+const noticeTitle = $<HTMLElement>('#notice-title');
+const noticeList = $<HTMLElement>('#notice-list');
 
 const defs = document.querySelector<SVGDefsElement>('#lg-defs defs')!;
 const glass = createGlassController(defs);
@@ -57,9 +67,53 @@ const worker = new Worker(new URL('../workers/extract.worker.ts', import.meta.ur
 let currentItems: ItemSummary[] = [];
 let view: View = { name: 'folders' };
 let renderToken = 0;
-const blobCache = new Map<number, Blob>();
-const objectUrls = new Map<number, string>();
-const pending = new Map<number, { ok: (b: Blob) => void; no: (e: Error) => void }>();
+
+/** 缓存键：同一条目的完整输出与 poster 单图分开存 */
+type CacheKey = string;
+const keyOf = (id: number, variant: BlobVariant): CacheKey => `${id}:${variant}`;
+
+/** 超过这个量就按插入顺序淘汰还没挂在页面上的 Blob */
+const MAX_CACHED_BLOB_BYTES = 160 * 1024 * 1024;
+const objectUrls = new Map<CacheKey, string>();
+const pending = new Map<CacheKey, { ok: (b: Blob) => void; no: (e: Error) => void }>();
+/** Map 的插入序就是 LRU 序 */
+const cachedBlobs = new Map<CacheKey, Blob>();
+let cachedBytes = 0;
+
+function cacheBlob(key: CacheKey, blob: Blob) {
+  const prev = cachedBlobs.get(key);
+  if (prev) cachedBytes -= prev.size;
+  cachedBlobs.set(key, blob);
+  cachedBytes += blob.size;
+  evictToBudget();
+}
+
+function dropBlob(key: CacheKey) {
+  const hit = cachedBlobs.get(key);
+  if (!hit) return;
+  cachedBlobs.delete(key);
+  cachedBytes -= hit.size;
+}
+
+function evictToBudget() {
+  for (const [key, blob] of cachedBlobs) {
+    if (cachedBytes <= MAX_CACHED_BLOB_BYTES) return;
+    // 还挂着 objectURL 的留着：淘汰了浏览器也不会真的释放，纯属假装省内存
+    if (objectUrls.has(key)) continue;
+    dropBlob(key);
+  }
+}
+
+function releaseObjectUrls() {
+  for (const url of objectUrls.values()) URL.revokeObjectURL(url);
+  objectUrls.clear();
+}
+
+function clearCaches() {
+  releaseObjectUrls();
+  cachedBlobs.clear();
+  cachedBytes = 0;
+}
 
 /** 超过这个数量还逐个下载就是自找麻烦，提示改用打包 */
 const BATCH_HINT = 20;
@@ -89,8 +143,7 @@ worker.onmessage = (ev: MessageEvent<OutMsg>) => {
   }
   if (msg.type === 'parsed') {
     rejectPending('条目已重新编号');
-    releaseObjectUrls();
-    blobCache.clear();
+    clearCaches();
     currentItems = msg.items;
     byId = new Map(msg.items.map((i) => [i.id, i]));
     // id 按产出条目重新分配，切换 .tex 转换还会改变条目总数，旧选中一律作废
@@ -109,12 +162,15 @@ worker.onmessage = (ev: MessageEvent<OutMsg>) => {
     renderSelbar();
     return;
   }
-  if (msg.type === 'blob') {
-    const blob = new Blob([msg.bytes as unknown as BlobPart], { type: msg.mime });
-    blobCache.set(msg.id, blob);
-    const waiter = pending.get(msg.id);
-    pending.delete(msg.id);
-    waiter?.ok(blob);
+  const key = keyOf(msg.id, msg.variant);
+  cacheBlob(key, msg.blob);
+  const waiter = pending.get(key);
+  pending.delete(key);
+  waiter?.ok(msg.blob);
+  if (msg.variant === 'full') {
+    if (msg.patch) applyItemPatch(msg.id, msg.patch);
+    // 惰性输出的体积此刻才准确，回填卡片
+    patchItemSize(msg.id, msg.bytes);
   }
 };
 
@@ -124,30 +180,93 @@ function setStatus(text: string, cls?: 'err' | 'ok') {
 }
 
 function currentOptions(): DecodeOptions {
-  return { texToImage: ($<HTMLInputElement>('#opt-tex')).checked };
+  return {
+    texToImage: optTex.checked,
+    animatedFormat: animatedFormat.value as DecodeOptions['animatedFormat'],
+    legacyFrames: new URLSearchParams(location.search).get('legacyFrames') === '1',
+  };
 }
 
-function requestBlob(id: number): Promise<Blob> {
-  const cached = blobCache.get(id);
+function requestBlob(id: number, variant: BlobVariant = 'full'): Promise<Blob> {
+  const key = keyOf(id, variant);
+  const cached = cachedBlobs.get(key);
   if (cached) return Promise.resolve(cached);
   return new Promise((resolve, reject) => {
-    pending.set(id, { ok: resolve, no: reject });
-    worker.postMessage({ type: 'blob', id });
+    pending.set(key, { ok: resolve, no: reject });
+    worker.postMessage({ type: 'blob', id, variant });
   });
 }
 
-async function previewUrl(id: number): Promise<string> {
-  const known = objectUrls.get(id);
+async function previewUrl(id: number, variant: BlobVariant = 'full'): Promise<string> {
+  const key = keyOf(id, variant);
+  const known = objectUrls.get(key);
   if (known) return known;
-  const blob = await requestBlob(id);
+  const blob = await requestBlob(id, variant);
   const url = URL.createObjectURL(blob);
-  objectUrls.set(id, url);
+  objectUrls.set(key, url);
   return url;
 }
 
-function releaseObjectUrls() {
-  for (const url of objectUrls.values()) URL.revokeObjectURL(url);
-  objectUrls.clear();
+/** 估算体积在真正编码完成后回填成精确值，只改这一个文本节点 */
+function patchItemSize(id: number, bytes: number) {
+  const item = byId.get(id);
+  if (!item || !item.estimated || item.bytes === bytes) return;
+  item.bytes = bytes;
+  item.estimated = false;
+  const el = grid.querySelector<HTMLElement>(`[data-size="${id}"]`);
+  if (!el) return;
+  el.textContent = fmtSize(bytes);
+  el.classList.remove('est');
+  el.removeAttribute('title');
+}
+
+/** 重编码失败回退后，条目变了名字和类型：原地改，别重建 DOM */
+function applyItemPatch(id: number, patch: ItemPatch) {
+  const item = byId.get(id);
+  if (!item || item.name === patch.name) return;
+  const kindChanged = item.kind !== patch.kind;
+  item.name = patch.name;
+  item.mime = patch.mime;
+  item.kind = patch.kind;
+  item.warning = patch.notice;
+  if (kindChanged) {
+    // 缩略图占位要换成图标，只能重建
+    render();
+  } else {
+    const nameEl = grid.querySelector<HTMLElement>(`[data-name="${id}"]`);
+    if (nameEl) {
+      nameEl.textContent = patch.name.split('/').pop() || patch.name;
+      nameEl.title = item.sourcePath;
+    }
+  }
+  reportDegraded(patch.name, patch.notice);
+}
+
+const pendingNotices: string[] = [];
+
+function reportDegraded(name: string, reason: string) {
+  const line = `${name}：${reason}`;
+  if (running) pendingNotices.push(line);
+  else showNotice('动图未能重编码，已回退为单帧图片', [line]);
+}
+
+function showNotice(title: string, lines: string[]) {
+  noticeTitle.textContent = title;
+  noticeList.innerHTML = lines.map((l) => `<li>${esc(l)}</li>`).join('');
+  notice.hidden = false;
+  glass.observe(notice);
+  $<HTMLButtonElement>('#notice-ok').focus();
+}
+
+function closeNotice() {
+  notice.hidden = true;
+  glass.release(notice);
+  glass.refresh();
+}
+
+function flushNotices() {
+  if (!pendingNotices.length) return;
+  showNotice('动图未能重编码，已回退为单帧图片', pendingNotices.splice(0));
 }
 
 // —— 多选 ——
@@ -198,7 +317,7 @@ function renderSelbar() {
     selSummary.innerHTML = n ? selKindText(n) : '';
   }
   selHint.hidden = n <= BATCH_HINT;
-  selHint.textContent = `已选 ${n} 个：逐个下载需要浏览器允许「下载多个文件」，每个文件还会完整解码进内存，建议改用打包下载。`;
+  selHint.textContent = `已选 ${n} 个：逐个下载需要浏览器允许「下载多个文件」，且会占用 ${n} 次下载队列；建议改用打包下载，只需一次保存。`;
 
   const scope = scopeItemsToSelect();
   const pendingCount = scope.filter((i) => !selected.has(i.id)).length;
@@ -243,6 +362,7 @@ function endRun() {
   running = false;
   runLabel = '';
   renderSelbar();
+  flushNotices();
 }
 
 // —— 拖拽 / 选择 ——
@@ -251,15 +371,21 @@ function handleFile(file: File) {
     setStatus('仅支持 .pkg 文件', 'err');
     return;
   }
-  if (file.size > 200 * 1024 * 1024) {
-    setStatus('文件超过 200MB，暂不支持在浏览器中处理', 'err');
+  if (file.size > LIMITS.pkgFormatCeiling) {
+    const why = `${fmtSize(file.size)}：PKGV 目录表的偏移字段是 int32，这个格式本身存不下超过 ${fmtSize(LIMITS.pkgFormatCeiling)} 的包`;
+    setStatus(why, 'err');
+    showNotice('这个包大到格式层面就无法解析', [why]);
     return;
   }
-  setStatus(`正在解析 ${file.name}（${fmtSize(file.size)}）…`);
+  setStatus(
+    file.size > LIMITS.softSizeWarn
+      ? `正在解析 ${file.name}（${fmtSize(file.size)}）… 包较大，只读目录表，导出时按需取数据`
+      : `正在解析 ${file.name}（${fmtSize(file.size)}）…`,
+  );
   progress.start('正在解析…');
-  file.arrayBuffer().then((buf) => {
-    worker.postMessage({ type: 'parse', buffer: buf, options: currentOptions() }, [buf]);
-  });
+  // 先让 worker 放下上一个包（连同它的 File 引用），再投新的
+  worker.postMessage({ type: 'close' });
+  worker.postMessage({ type: 'open', file, options: currentOptions() });
 }
 
 dropzone.addEventListener('dragover', (e) => {
@@ -297,9 +423,11 @@ function renderMeta(meta: WallpaperMeta | undefined, items: ItemSummary[]) {
 }
 
 function fmtSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+  const KB = 1024, MB = KB * 1024, GB = MB * 1024;
+  if (n < KB) return `${n} B`;
+  if (n < MB) return `${(n / KB).toFixed(1)} KB`;
+  if (n < GB) return `${(n / MB).toFixed(2)} MB`;
+  return `${(n / GB).toFixed(2)} GB`;
 }
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -382,8 +510,10 @@ function renderFolderContents(kind: ItemKind, page: number) {
       <input class="card-check" type="checkbox" ${on ? 'checked' : ''} aria-label="选中 ${esc(item.name)}" />
       <div class="thumb" data-slot="${item.id}">${media ? '' : `<span style="font-size:16px">${groupIcon(item.kind)}</span>`}</div>
       <div class="info">
-        <div class="name" title="${esc(item.sourcePath)}">${esc(item.name)}</div>
-        <div class="meta"><span>${esc(item.kind)}</span><span>${fmtSize(item.bytes)}</span></div>
+        <div class="name" data-name="${item.id}" title="${esc(item.sourcePath)}">${esc(item.name)}</div>
+        <div class="meta"><span>${esc(item.kind)}</span><span class="size${item.estimated ? ' est' : ''}" data-size="${item.id}"${
+          item.estimated ? ' title="动图为编码前估算值，导出后会回填成实际大小"' : ''
+        }>${item.estimated ? '~' : ''}${fmtSize(item.bytes)}${item.estimated ? ' 估算' : ''}</span></div>
         ${item.warning ? `<div class="warn">${esc(item.warning)}</div>` : ''}
         <div class="actions">
           <button class="btn small" data-download="${item.id}">下载</button>
@@ -442,7 +572,8 @@ async function loadThumbs() {
     if (!item || (item.kind !== 'image' && item.kind !== 'video')) continue;
     let url: string;
     try {
-      url = await previewUrl(id);
+      // 动图取第 0 帧单图：不为了一格缩略图去编整个动画
+      url = await previewUrl(id, item.poster ? 'poster' : 'full');
     } catch {
       continue;
     }
@@ -512,18 +643,24 @@ pager.addEventListener('click', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' && e.key !== 'ArrowLeft') return;
+  if (!notice.hidden) {
+    if (e.key === 'Escape') closeNotice();
+    return;
+  }
   if (!modal.hidden) {
     if (e.key === 'Escape') closeModal();
     return;
   }
-  if (e.key === 'Escape') {
-    closeModal();
-    return;
-  }
+  if (e.key === 'Escape') return;
   if (view.name === 'folder' && !isTyping(e.target)) {
     view = { name: 'folders' };
     render();
   }
+});
+
+$<HTMLButtonElement>('#notice-ok').addEventListener('click', closeNotice);
+notice.addEventListener('click', (e) => {
+  if (e.target === notice) closeNotice();
 });
 
 function isTyping(target: EventTarget | null): boolean {
@@ -606,23 +743,6 @@ function scopeItems(): ItemSummary[] {
   return currentItems.filter((i) => i.kind === scope);
 }
 
-const entryName = (item: ItemSummary, keepPath: boolean) =>
-  keepPath ? item.name : item.name.split('/').pop() || 'download';
-
-/** 关闭「保留目录结构」后不同目录的同名条目会撞成同一个 key，撞了就加序号，别静默覆盖 */
-function uniqueKey(want: string, used: Set<string>): string {
-  if (!used.has(want)) { used.add(want); return want; }
-  const dot = want.lastIndexOf('.');
-  let n = 2;
-  let key = '';
-  do {
-    key = dot > 0 ? `${want.slice(0, dot)}-${n}${want.slice(dot)}` : `${want}-${n}`;
-    n += 1;
-  } while (used.has(key));
-  used.add(key);
-  return key;
-}
-
 /** 不用 rAF 让步：后台标签页里 rAF 不触发，批量循环会永久卡住 */
 const yieldToUI = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -644,54 +764,56 @@ async function zipItems(items: ItemSummary[]) {
   const epoch = parseEpoch;
   const keepPath = ($<HTMLInputElement>('#opt-keep-path')).checked;
   setStatus(`正在打包 ${items.length} 个文件…`);
-  progress.start('正在解码…', items.length);
-  const files: Record<string, Uint8Array> = {};
+  progress.start('正在导出…', items.length);
+  const zw = new ZipWriter();
   const used = new Set<string>();
   let done = 0;
+  let written = 0;
   let skipped = 0;
   let renamed = 0;
   for (const item of items) {
     if (abortIfStale(epoch)) return;
     try {
-      const want = entryName(item, keepPath);
+      const blob = await requestBlob(item.id);
+      // 名字要在编码之后再定：降级回退会当场改掉 item.name
+      const want = entryName(item.name, keepPath);
       const key = uniqueKey(want, used);
       if (key !== want) renamed += 1;
-      const blob = await requestBlob(item.id);
-      files[key] = new Uint8Array(await blob.arrayBuffer());
-      // 打包时每个 id 只用一次，留在 blobCache 里纯属白占内存
-      blobCache.delete(item.id);
+      await zw.addFile(key, blob);
+      written += 1;
+      // 打包只用一次；还挂在预览上的留着，省得再解一次
+      if (!objectUrls.has(keyOf(item.id, 'full'))) dropBlob(keyOf(item.id, 'full'));
     } catch {
       skipped += 1;
     }
     done += 1;
     progress.set(done);
-    setRunState(`已处理 ${done}/${items.length}`);
+    setRunState(`已写入 ${written}/${items.length}`);
     if (done % 5 === 0) await yieldToUI();
   }
-  if (!Object.keys(files).length) {
+  if (!written) {
     progress.hide();
     endRun();
-    setStatus(`打包失败：${skipped} 个条目全部解码失败`, 'err');
+    setStatus(`打包失败：${skipped} 个条目全部导出失败`, 'err');
     return;
   }
-  progress.start('正在写入 ZIP…');
-  setRunState('正在写入 ZIP…');
-  const { zip } = await import('fflate');
-  zip(files, { level: 0 }, (err, data) => {
-    if (err) {
-      progress.hide();
-      endRun();
-      setStatus(`ZIP 失败: ${err.message}`, 'err');
-      return;
-    }
-    const summary = [fmtSize(data.length), `${done} 个`, skipped ? `跳过 ${skipped} 个` : '', renamed ? `重命名 ${renamed} 个` : '']
-      .filter(Boolean)
-      .join(' · ');
-    saveBlob(new Blob([data as unknown as BlobPart], { type: 'application/zip' }), 'wallpaper-extract.zip');
-    setStatus(`ZIP 完成（${summary}）`, skipped ? 'err' : 'ok');
-    progress.finish(`ZIP 完成 · ${summary}`);
+  setRunState('正在收尾…');
+  let zipBlob: Blob;
+  try {
+    zipBlob = zw.finish();
+  } catch (e) {
+    progress.hide();
     endRun();
-  });
+    setStatus(`ZIP 失败: ${(e as Error).message}`, 'err');
+    return;
+  }
+  const summary = [fmtSize(zipBlob.size), `${written} 个`, skipped ? `跳过 ${skipped} 个` : '', renamed ? `重命名 ${renamed} 个` : '']
+    .filter(Boolean)
+    .join(' · ');
+  saveBlob(zipBlob, 'wallpaper-extract.zip');
+  setStatus(`ZIP 完成（${summary}）`, skipped ? 'err' : 'ok');
+  progress.finish(`ZIP 完成 · ${summary}`);
+  endRun();
 }
 
 /**
@@ -716,7 +838,8 @@ async function downloadItems(items: ItemSummary[]) {
       saveBlob(blob, item.name);
       dispatched += 1;
       // 已经在预览里的条目留着，省得再解一次
-      if (!objectUrls.has(item.id)) blobCache.delete(item.id);
+      const key = keyOf(item.id, 'full');
+      if (!objectUrls.has(key)) dropBlob(key);
     } catch {
       fail += 1;
     }
@@ -741,14 +864,26 @@ selClear.addEventListener('click', () => setMany(currentItems, false));
 selAll.addEventListener('click', () => setMany(scopeItemsToSelect(), true));
 
 // —— 选项变化 ——
-$<HTMLElement>('#opt-tex').addEventListener('change', () => {
+function reparse() {
   if (!currentItems.length) return;
   setStatus('正在按新选项重新解析…');
   progress.start('正在重新解析…');
   worker.postMessage({ type: 'reparse', options: currentOptions() });
-});
+}
+
+function syncOptionVisibility() {
+  animatedField.hidden = !($<HTMLInputElement>('#opt-tex')).checked;
+}
+
+for (const el of [optTex, animatedFormat]) {
+  el.addEventListener('change', () => {
+    syncOptionVisibility();
+    reparse();
+  });
+}
 
 // —— 启动 ——
 glass.observe(document.body);
 dock.start();
+syncOptionVisibility();
 renderSelbar();

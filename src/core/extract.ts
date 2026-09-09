@@ -1,185 +1,258 @@
-import type { DecodeOptions, ExtractItem, PkgFile, TexFile, TexMipmap } from './types';
-import { parseTex, TexFormat, TexFlags, Fif, isEncodedImageFormat } from './tex';
-import { lz4Decompress } from './lz4';
-import { decompressDxt, rg88ToRgba, r8ToRgba, rgba8888ToRgba } from './dxt';
-import { encodePng } from './png';
+import { animationJob, animationSurface, estimateAnimationBytes, formatsOf, FrameSource, SINK_PLANS } from './animation';
+import { LIMITS } from './limits';
 import { parseProjectMeta } from './metadata';
-import type { WallpaperMeta } from './types';
+import { encodePng } from './png';
+import { ENCODED_EXT, rasterOfImage } from './raster';
+import { Fif, TexFlags, isEncodedImageFormat, parseTex, readMipmapBlob } from './tex';
+import type { BlobVariant, DecodeOptions, DecodePorts, ExtractItem, ItemKind, PkgFile, Raster, TexFile, WallpaperMeta } from './types';
 
 const EXT_MIME: Record<string, string> = {
-  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', apng: 'image/apng',
   webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon',
   mp4: 'video/mp4', webm: 'video/webm', mp3: 'audio/mpeg', ogg: 'audio/ogg',
   json: 'application/json', txt: 'text/plain',
 };
-const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']);
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'apng']);
 const VIDEO_EXTS = new Set(['mp4', 'webm']);
 
-const FIF_EXT: Record<number, string> = { [Fif.PNG]: 'png', [Fif.JPEG]: 'jpg', [Fif.GIF]: 'gif', [Fif.MP4]: 'mp4' };
+/** 逐帧 PNG 兜底路径最多产出多少帧 */
+const LEGACY_FRAME_CAP = 60;
 
 function extOf(name: string): string {
   const m = /\.(\w+)$/.exec(name);
   return m ? m[1].toLowerCase() : '';
 }
 
-function base64SliceToBlob(bytes: Uint8Array, mime: string): Blob {
+function blobOf(bytes: Uint8Array, mime: string): Blob {
   return new Blob([bytes as unknown as BlobPart], { type: mime });
 }
 
-/** mipmap 数据按 isLz4 解压（dxt/rgba 直通路径用） */
-function mipBytes(mip: TexMipmap): Uint8Array {
-  if (!mip.isLz4) return mip.data;
-  return lz4Decompress(mip.data, mip.decompressedLength);
+/** 输出只物化一次 */
+function memo(make: () => Promise<Blob>): () => Promise<Blob> {
+  let p: Promise<Blob> | undefined;
+  return () => (p ??= make());
 }
 
-/** imageFormat==-1 的原始纹理解码为 RGBA */
-export function decodeRawTexToRgba(tex: TexFile, mip: TexMipmap): Uint8Array {
-  const data = mipBytes(mip);
-  switch (tex.texFormat) {
-    case TexFormat.RGBA8888: return rgba8888ToRgba(data, mip.width, mip.height);
-    case TexFormat.RG88: return rg88ToRgba(data, mip.width, mip.height);
-    case TexFormat.R8: return r8ToRgba(data, mip.width, mip.height);
-    case TexFormat.DXT1: return decompressDxt(mip.width, mip.height, data, 1);
-    case TexFormat.DXT3: return decompressDxt(mip.width, mip.height, data, 2);
-    case TexFormat.DXT5: return decompressDxt(mip.width, mip.height, data, 5);
-    default: throw new Error(`无法解码的 TexFormat: ${tex.texFormat}`);
-  }
+export function texBaseName(sourceName: string): string {
+  return sourceName.replace(/\.tex$/i, '');
 }
 
-interface TexOutcome {
+export interface TexOutcome {
   name: string;
   mime: string;
-  kind: ExtractItem['kind'];
-  bytes: Uint8Array;
+  kind: ItemKind;
+  bytes: number;
+  estimated?: boolean;
+  poster?: boolean;
+  make(variant?: BlobVariant): Promise<Blob>;
 }
 
-/** 单个 .tex → 输出文件（0~N 个结果由调用方决定个数；这里返回主输出） */
-export function texToPrimaryOutput(tex: TexFile, sourceName: string): TexOutcome {
-  const base = sourceName.replace(/\.tex$/i, '');
+/** 单个 .tex 的主输出：编码类零拷贝直通，原始类解码成 PNG */
+export async function texToPrimaryOutput(tex: TexFile, sourceName: string): Promise<TexOutcome> {
+  const base = texBaseName(sourceName);
   const mip0 = tex.images[0]?.[0];
   if (!mip0) throw new Error('TEX 无 mipmap');
 
   if (tex.imageFormat === Fif.MP4) {
-    return { name: base + '.mp4', mime: 'video/mp4', kind: 'video', bytes: mip0.data };
+    return {
+      name: `${base}.mp4`, mime: 'video/mp4', kind: 'video', bytes: mip0.length,
+      make: memo(() => readMipmapBlob(tex, 0)),
+    };
   }
   if (isEncodedImageFormat(tex.imageFormat)) {
-    const ext = FIF_EXT[tex.imageFormat] ?? 'img';
-    const mime = EXT_MIME[ext] ?? 'application/octet-stream';
-    return { name: `${base}.${ext}`, mime, kind: 'image', bytes: mip0.data };
+    const ext = ENCODED_EXT[tex.imageFormat] ?? 'img';
+    return {
+      name: `${base}.${ext}`, mime: EXT_MIME[ext] ?? 'application/octet-stream', kind: 'image',
+      bytes: mip0.length, make: memo(() => readMipmapBlob(tex, 0)),
+    };
   }
-  const rgba = decodeRawTexToRgba(tex, mip0);
-  let w = mip0.width;
-  let h = mip0.height;
-  // 裁剪到 imageWidth/Height（repkg 行为：mip 尺寸 ≥ 目标尺寸才裁）
-  if (tex.imageWidth > 0 && tex.imageWidth <= w && tex.imageHeight > 0 && tex.imageHeight <= h) {
-    const cropped = new Uint8Array(tex.imageWidth * tex.imageHeight * 4);
-    for (let y = 0; y < tex.imageHeight; y++) {
-      cropped.set(rgba.subarray(y * w * 4, y * w * 4 + tex.imageWidth * 4), y * tex.imageWidth * 4);
-    }
-    w = tex.imageWidth;
-    h = tex.imageHeight;
-    return { name: base + '.png', mime: 'image/png', kind: 'image', bytes: encodePng(cropped, w, h) };
-  }
-  return { name: base + '.png', mime: 'image/png', kind: 'image', bytes: encodePng(rgba, w, h) };
+  const raster = await rasterOfImage(tex, 0, {});
+  const png = encodePng(raster.rgba, raster.width, raster.height);
+  return {
+    name: `${base}.png`, mime: 'image/png', kind: 'image', bytes: png.length,
+    make: memo(async () => blobOf(png, 'image/png')),
+  };
 }
 
-export function gifFrameOutputs(tex: TexFile, sourceName: string): TexOutcome[] {
+/**
+ * 临时方案：每帧一张 PNG。
+ * 只在重编码不可用时兜底，以及 ?legacyFrames=1 逐帧核对帧矩形/时间语义时用。
+ */
+export async function legacyFrameOutputs(tex: TexFile, sourceName: string, ports: DecodePorts): Promise<TexOutcome[]> {
   const out: TexOutcome[] = [];
-  const base = sourceName.replace(/\.tex$/i, '');
-  for (let i = 0; i < tex.frames.length && i < tex.images.length; i++) {
-    const mip0 = tex.images[i][0];
-    if (!mip0) continue;
+  const base = texBaseName(sourceName);
+  const count = Math.min(tex.frames.length, LEGACY_FRAME_CAP);
+  for (let i = 0; i < count; i++) {
     try {
-      const rgba = decodeRawTexToRgba(tex, mip0);
+      // 帧用 imageId 索引自己的 image，不是循环下标
+      const raster: Raster = await rasterOfImage(tex, tex.frames[i].imageId, ports);
+      const png = encodePng(raster.rgba, raster.width, raster.height);
       out.push({
         name: `${base}.frame${String(i).padStart(3, '0')}.png`,
-        mime: 'image/png', kind: 'image',
-        bytes: encodePng(rgba, mip0.width, mip0.height),
+        mime: 'image/png', kind: 'image', bytes: png.length,
+        make: memo(async () => blobOf(png, 'image/png')),
       });
     } catch {
-      /* 单帧失败跳过，不阻断 */
+      continue; // 单帧失败跳过，不阻断
     }
   }
   return out;
 }
 
-export function buildItems(pkg: PkgFile, options: DecodeOptions): { items: ExtractItem[]; meta?: WallpaperMeta } {
+export function isAnimatedTex(tex: TexFile): boolean {
+  return (tex.flags & TexFlags.IsGif) !== 0 && tex.frames.length > 1;
+}
+
+/** 原始纹理格式本地就能解码；内嵌编码帧必须有宿主提供的 decodeRaster */
+function canReencode(tex: TexFile, ports: DecodePorts): boolean {
+  if (tex.imageFormat === Fif.MP4) return false;
+  return !isEncodedImageFormat(tex.imageFormat) || !!ports.decodeRaster;
+}
+
+/** 动画贴图 → 1~2 个条目（每个格式一条），编码惰性、体积估算、超限按格式各自降级 */
+function animatedItems(
+  tex: TexFile, entry: { name: string; length: number }, options: DecodeOptions, ports: DecodePorts,
+  firstId: number, nextId: () => number, fallback: () => Promise<Blob>,
+): ExtractItem[] {
+  const surface = animationSurface(tex);
+  const formats = formatsOf(options.animatedFormat);
+  const base = texBaseName(entry.name);
+  const source = new FrameSource(tex, surface, ports, tex.frames);
+  const run = animationJob(tex.frames, source, formats);
+  const poster = memo(async () =>
+    blobOf(encodePng(await source.framePixels(tex.frames[0]), surface.w, surface.h), 'image/png'));
+  console.info(
+    `[anim] ${entry.name}: ${tex.frames.length} 帧 · 画布 ${surface.w}x${surface.h} · 输出 ${options.animatedFormat}`,
+    tex.frames.slice(0, 3).map((f) => `${f.imageId}@${f.frametime.toFixed(3)}s[${f.x},${f.y},${f.width},${f.height}]`).join(' '),
+  );
+  return formats.map((f, i) => {
+    const plan = SINK_PLANS[f];
+    const item: ExtractItem = {
+      id: i === 0 ? firstId : nextId(),
+      name: `${base}.${plan.ext}`,
+      sourcePath: entry.name,
+      kind: 'image',
+      mime: plan.mime,
+      bytes: estimateAnimationBytes(tex, surface, tex.frames, f),
+      estimated: true,
+      poster: true,
+      tex,
+      toBlob: async (variant: BlobVariant = 'full') => {
+        if (variant === 'poster') return poster();
+        let got: Blob | Error | undefined;
+        try {
+          got = (await run()).get(f);
+        } catch (e) {
+          got = e as Error;
+        }
+        if (got instanceof Blob) return got;
+        const reason = got instanceof Error ? got.message : '编码失败';
+        try {
+          // 这个格式编不出来（超上限 / 缺解码能力）→ 回退第 0 帧 PNG
+          const png = await poster();
+          item.degraded = { name: `${base}.png`, mime: 'image/png', kind: 'image', reason };
+          return png;
+        } catch (e) {
+          // 连第 0 帧都解不出来 → 原样导出包内 .tex，至少下载不会失败
+          item.degraded = {
+            name: entry.name, mime: 'application/octet-stream', kind: 'binary',
+            reason: `${reason}；第 0 帧也无法解码（${(e as Error).message}），已按原样导出`,
+          };
+          return fallback();
+        }
+      },
+    };
+    return item;
+  });
+}
+
+function passthroughItem(
+  id: number, entry: { name: string; length: number }, source: PkgFile['source'], kind: ItemKind, mime: string,
+): ExtractItem {
+  return {
+    id, name: entry.name, sourcePath: entry.name, kind, mime, bytes: entry.length,
+    toBlob: memo(() => source.blob(0, entry.length)),
+  };
+}
+
+export async function buildItems(
+  pkg: PkgFile,
+  options: DecodeOptions,
+  ports: DecodePorts = {},
+): Promise<{ items: ExtractItem[]; meta?: WallpaperMeta }> {
   const items: ExtractItem[] = [];
   let meta: WallpaperMeta | undefined;
   let nextId = 1;
-  for (const entry of pkg.entries) {
-    const raw = pkg.bytes.subarray(pkg.dataStart + entry.offset, pkg.dataStart + entry.offset + entry.length);
-    const ext = extOf(entry.name);
-    const id = nextId++;
+  const takeId = () => nextId++;
 
-    if (ext === 'tex') {
-      if (!options.texToImage) {
-        items.push({
-          id, name: entry.name, sourcePath: entry.name, kind: 'binary',
-          mime: 'application/octet-stream', bytes: entry.length,
-          toBlob: () => base64SliceToBlob(raw, 'application/octet-stream'),
-        });
-        continue;
+  for (const entry of pkg.entries) {
+    const ext = extOf(entry.name);
+    const id = takeId();
+    const source = pkg.entrySource(entry);
+    const rawOutput = (warning: string): ExtractItem => ({
+      id, name: entry.name, sourcePath: entry.name, kind: 'binary',
+      mime: 'application/octet-stream', bytes: entry.length, warning,
+      toBlob: memo(() => pkg.entryBlob(entry)),
+    });
+
+    if (ext !== 'tex') {
+      const mime = EXT_MIME[ext] ?? 'application/octet-stream';
+      const kind: ItemKind = IMAGE_EXTS.has(ext) ? 'image' : VIDEO_EXTS.has(ext) ? 'video' : ext === 'json' ? 'json' : 'binary';
+      if (ext === 'json' && /(^|\/)project\.json$/.test(entry.name)) {
+        try {
+          const bytes = await source.read(0, Math.min(entry.length, LIMITS.metaJsonMaxRead), 'project.json');
+          meta = parseProjectMeta(new TextDecoder().decode(bytes), entry.name);
+        } catch { /* 忽略 */ }
       }
-      let tex: TexFile;
-      try {
-        tex = parseTex(raw);
-      } catch (e) {
-        items.push({
-          id, name: entry.name, sourcePath: entry.name, kind: 'binary',
-          mime: 'application/octet-stream', bytes: entry.length,
-          warning: `TEX 解析失败，已按原样导出: ${(e as Error).message}`,
-          toBlob: () => base64SliceToBlob(raw, 'application/octet-stream'),
-        });
-        continue;
-      }
-      try {
-        const main = texToPrimaryOutput(tex, entry.name);
-        const extraFrames = tex.flags & TexFlags.IsGif ? gifFrameOutputs(tex, entry.name) : [];
-        let blob: Blob | undefined;
-        const make = (bytes: Uint8Array, mime: string) => () => base64SliceToBlob(bytes, mime);
-        items.push({
-          id, name: main.name, sourcePath: entry.name, kind: main.kind,
-          mime: main.mime, bytes: main.bytes.length, tex,
-          toBlob: () => (blob ??= base64SliceToBlob(main.bytes, main.mime)),
-        });
-        for (const f of extraFrames) {
-          items.push({
-            id: nextId++, name: f.name, sourcePath: entry.name, kind: f.kind,
-            mime: f.mime, bytes: f.bytes.length,
-            toBlob: make(f.bytes, f.mime),
-          });
-        }
-        void make;
-      } catch (e) {
-        items.push({
-          id, name: entry.name, sourcePath: entry.name, kind: 'binary',
-          mime: 'application/octet-stream', bytes: entry.length, tex,
-          warning: `TEX 解码失败，已按原样导出: ${(e as Error).message}`,
-          toBlob: () => base64SliceToBlob(raw, 'application/octet-stream'),
-        });
-      }
+      items.push(passthroughItem(id, entry, source, kind, mime));
       continue;
     }
 
-    const mime = EXT_MIME[ext] ?? 'application/octet-stream';
-    const kind = IMAGE_EXTS.has(ext) ? 'image' : VIDEO_EXTS.has(ext) ? 'video' : ext === 'json' ? 'json' : 'binary';
-    if (ext === 'json' && /(^|\/)project\.json$/.test(entry.name)) {
-      try {
-        meta = parseProjectMeta(new TextDecoder().decode(raw), entry.name);
-      } catch { /* 忽略 */ }
+    if (!options.texToImage) {
+      items.push(passthroughItem(id, entry, source, 'binary', 'application/octet-stream'));
+      continue;
     }
-    items.push({
-      id, name: entry.name, sourcePath: entry.name, kind, mime, bytes: entry.length,
-      toBlob: () => base64SliceToBlob(raw, mime),
-    });
+
+    let tex: TexFile;
+    try {
+      tex = await parseTex(source);
+    } catch (e) {
+      items.push(rawOutput(`TEX 解析失败，已按原样导出: ${(e as Error).message}`));
+      continue;
+    }
+    try {
+      if (isAnimatedTex(tex)) {
+        if (options.legacyFrames) {
+          const frames = await legacyFrameOutputs(tex, entry.name, ports);
+          if (frames.length) {
+            items.push(...frames.map((o) => ({
+              id: takeId(), name: o.name, sourcePath: entry.name, kind: o.kind,
+              mime: o.mime, bytes: o.bytes, tex, toBlob: o.make,
+            })));
+            continue;
+          }
+        } else if (canReencode(tex, ports)) {
+          items.push(...animatedItems(tex, entry, options, ports, id, takeId, () => pkg.entryBlob(entry)));
+          continue;
+        } else {
+          const main = await texToPrimaryOutput(tex, entry.name);
+          main.poster = true;
+          items.push({
+            id, name: main.name, sourcePath: entry.name, kind: main.kind,
+            mime: main.mime, bytes: main.bytes, tex, toBlob: main.make,
+            warning: `动画共 ${tex.frames.length} 帧，但内嵌帧的解码需要浏览器能力，当前环境没有：只导出了第一帧`,
+          });
+          continue;
+        }
+      }
+      const main = await texToPrimaryOutput(tex, entry.name);
+      items.push({
+        id, name: main.name, sourcePath: entry.name, kind: main.kind,
+        mime: main.mime, bytes: main.bytes, tex, toBlob: main.make,
+      });
+    } catch (e) {
+      items.push(rawOutput(`TEX 解码失败，已按原样导出: ${(e as Error).message}`));
+    }
   }
   return { items, meta };
-}
-
-/** ZIP/下载用：条目全字节（惰性物化） */
-export function entryBytes(pkg: PkgFile, entryName: string): Uint8Array {
-  const e = pkg.entries.find((x) => x.name === entryName);
-  if (!e) throw new Error(`entry 不存在: ${entryName}`);
-  return pkg.bytes.subarray(pkg.dataStart + e.offset, pkg.dataStart + e.offset + e.length);
 }

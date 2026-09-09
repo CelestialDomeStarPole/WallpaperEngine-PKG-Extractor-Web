@@ -63,6 +63,14 @@
           <span class="switch-track" aria-hidden="true"></span>
           <span>保留目录结构</span>
         </label>
+        <label class="field" id="field-animated">
+          <span class="field-label">动图格式</span>
+          <select id="opt-animated">
+            <option value="apng" selected>APNG（无损·保留透明）</option>
+            <option value="gif">GIF（256 色·体积小）</option>
+            <option value="both">两者都出</option>
+          </select>
+        </label>
         <label class="field">
           <span class="field-label">打包范围</span>
           <select id="opt-zip-scope"></select>
@@ -88,7 +96,7 @@
     </main>
 
     <footer class="foot">
-      <p>明文 PKGV 格式 · 支持 jpg / png / mp4 / webm / tex 解码 · Workshop 加密包后续支持</p>
+      <p>明文 PKGV 格式 · 支持 jpg / png / mp4 / webm / tex 解码与动画重编码（APNG / GIF）· Workshop 加密包后续支持</p>
     </footer>
   </div>
 
@@ -140,6 +148,17 @@
     <div class="modal-body glass">
       <button class="modal-close" id="modal-close" aria-label="关闭">×</button>
       <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <div id="notice" class="modal" role="alertdialog" aria-labelledby="notice-title" aria-modal="true" hidden>
+    <div class="modal-body glass notice-body">
+      <h2 id="notice-title"></h2>
+      <ul id="notice-list" class="notice-list"></ul>
+      <p class="dock-note">可在「动图格式」里换一种格式，或关掉 .tex 转换直接导出原始贴图。</p>
+      <div class="notice-actions">
+        <button id="notice-ok" class="btn small primary lg-sheen" type="button">知道了</button>
+      </div>
     </div>
   </div>
   <script type="module" src="/src/ui/main.ts"></script>

@@ -1,7 +1,7 @@
 {
   "name": "wallpaper-engine-pkg-extract",
   "private": true,
-  "version": "0.2.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "test": "vitest run",
     "verify": "tsx scripts/verify.ts",
     "verify-zip": "tsx scripts/verify-zip.ts",
+    "verify:anim": "tsx scripts/verify-animated.ts",
     "deploy": "npm run build && wrangler deploy",
     "deploy:dry": "npm run build && wrangler deploy --dry-run",
     "preview:cf": "npm run build && wrangler dev"

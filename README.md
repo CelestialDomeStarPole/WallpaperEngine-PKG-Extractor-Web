@@ -6,14 +6,16 @@
 
 </div>
 
-在**用户浏览器本地**解析 Wallpaper Engine 的 `.pkg` 壁纸包，提取 jpg / png / mp4 / webm 及包内任意资源；支持 `.tex` 解码转换；一切行为均在本地进行，与网站服务器无关，可静态部署。[示例网站](https://pkg.cdsp.us.ci)
+在**用户浏览器本地**解析 Wallpaper Engine 的 `.pkg` 壁纸包，提取 jpg / png / mp4 / webm 及包内任意资源；支持 `.tex` 解码转换与动画贴图重编码为 APNG / GIF；一切行为均在本地进行，与网站服务器无关，可静态部署。[示例网站](https://pkg.cdsp.us.ci)
 
 ## 功能
 
-- 拖拽 / 选择 `.pkg` 文件（≤200MB）
+- 拖拽 / 选择 `.pkg` 文件，最大接近 2GB（解析只读目录表，包体不驻留内存）
 - 条目列表 + 图片/视频缩略预览 + 大图弹窗
 - `.tex → jpg/png/mp4` 自动转换（可关闭，关闭则原样导出 `.tex`）
-- 单文件下载 / 保留目录结构的 ZIP 批量打包
+- 动画贴图（带帧表的 `.tex`）重编码为单个 **APNG**（无损、保留透明）或 **GIF**（256 色、体积小），也可两者都出
+- 多选卡片：选中文件一键下载 / 打包为 ZIP
+- 单文件下载 / 保留目录结构的 ZIP 批量打包（流式写出，不把整包读进内存）
 - 筛选（图片/视频/JSON）、`project.json` 元数据卡片
 
 ## 开发与验证
@@ -54,7 +56,7 @@ npm run dev        # http://localhost:5199
 
 ## Workers部署
 
-- 克隆此项目并将文件夹上传至 Cloudflare Workers 保持默认选项部署
+- 克隆此项目并将文件夹上传至 Cloudflare Workers 部署
 - 或者fork此项目 Cloudflare 链接你的账户并选择fork后的仓库进行**workers**部署
 
 ### CF Wokers 构建配置设置
@@ -69,14 +71,16 @@ npm run dev        # http://localhost:5199
 ## 未来
 
 - 加密支持pkg支持
-- APNG/GIF 重编码
 
 ## 格式参考
 
 - 容器与 TEX 布局逐字节翻写自 [notscuffed/repkg](https://github.com/notscuffed/repkg)(MIT)
+- 实测动画贴图（`flags & 4`）：所有帧共用**一张雪碧图**，帧表的 `x/y/width/height` 是该图内的**源格子**（像素单位），`TEXS0003` 的 `gifWidth/gifHeight` 才是输出画布尺寸，`frametime` 单位为秒
 - 第二期加密支持：在 `src/core/adapter.ts` 注册新 `ContainerAdapter`（`PKG ` v1/v2：AES-CTR keystream + 逐文件 zlib），核心流程无需改动。
 
 ## 已知限制
 
-- 动画 GIF tex 第一期导出首帧 + 全部帧 PNG，不做 APNG/GIF 重编码
-- 不处理音频壁纸 mp3 之外的特殊格式；>200MB 文件拒绝
+- Workshop 加密包（`PKG ` v1/v2）暂不支持，第二期提供
+- 不支持 `.webm/.mp4` 之外的音视频特殊格式
+- PKGV 目录表的偏移字段是 int32，因此 **>2GB 的包在格式层面就无法存在**，这类文件会被直接拒绝
+- 单个动画重编码输出超过 200MB 时自动回退为第 0 帧 PNG，并弹窗说明原因
