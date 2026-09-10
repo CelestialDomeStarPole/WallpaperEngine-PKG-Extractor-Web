@@ -4,7 +4,8 @@ import type { ByteSource } from './bytesource';
 import type { ContainerAdapter, PkgEntry, PkgFile } from './types';
 import { LIMITS } from './limits';
 
-const MAGIC_RE = /^PKGV\d{4}$/;
+/** PKGV#### = 桌面 .pkg，PKGM#### = 安卓 .mpkg；两者目录表布局实测一致，共用一套解析 */
+const MAGIC_RE = /^PKG[VM]\d{4}$/;
 /** 目录表一条记录至少 = 4(名长) + 1(名) + 4(偏移) + 4(长度) */
 const MIN_RECORD = 13;
 
@@ -72,7 +73,7 @@ export async function parsePlain(source: ByteSource): Promise<PkgFile> {
 
 export const plainAdapter: ContainerAdapter = {
   id: 'plain',
-  label: '明文 PKGV',
+  label: '明文 PKG',
   detect: detectPlain,
   parse: parsePlain,
 };

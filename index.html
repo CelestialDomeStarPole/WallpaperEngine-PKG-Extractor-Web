@@ -19,7 +19,7 @@
       <header class="masthead glass">
         <div class="masthead-text">
           <h1>WE PKG 提取器</h1>
-          <p class="sub">纯浏览器本地解析 .pkg 壁纸包 · 文件不会上传</p>
+          <p class="sub">纯浏览器本地解析 .pkg / .mpkg 壁纸包 · 文件不会上传</p>
         </div>
         <div class="masthead-side">
           <a class="gh-link" href="https://github.com/CelestialDomeStarPole/WallpaperEngine-PKG-Extractor-Web"
@@ -36,10 +36,10 @@
     <main class="shell">
       <section id="dropzone" class="dropzone glass">
         <div class="dz-inner">
-          <p class="dz-lead">拖入 <code>.pkg</code> 文件，或</p>
+          <p class="dz-lead">拖入 <code>.pkg / .mpkg</code> 文件，或</p>
           <label class="btn lg-sheen">
             选择文件
-            <input type="file" id="file-input" accept=".pkg" hidden />
+            <input type="file" id="file-input" accept=".pkg,.mpkg" hidden />
           </label>
           <p id="status" class="status"></p>
         </div>
@@ -96,7 +96,7 @@
     </main>
 
     <footer class="foot">
-      <p>明文 PKGV 格式 · 支持 jpg / png / mp4 / webm / tex 解码与动画重编码（APNG / GIF）· Workshop 加密包后续支持</p>
+      <p>明文 PKGV / PKGM 格式（桌面 .pkg / 安卓 .mpkg）· 支持 jpg / png / mp4 / webm / tex 解码与动画重编码（APNG / GIF）· Workshop 加密包后续支持</p>
     </footer>
   </div>
 

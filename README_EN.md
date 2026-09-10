@@ -6,11 +6,11 @@ English | [简体中文](README.md)
 
 </div>
 
-Parses Wallpaper Engine `.pkg` wallpaper packages **entirely in the user's browser**, extracting jpg / png / mp4 / webm and any other resource inside the package; supports `.tex` decoding and conversion. Everything runs locally and is independent of the web server, so it can be deployed as a static site. [Live Demo](https://pkg.cdsp.us.ci)
+Parses Wallpaper Engine `.pkg` (desktop) / `.mpkg` (Android) wallpaper packages **entirely in the user's browser**, extracting jpg / png / mp4 / webm and any other resource inside the package; supports `.tex` decoding and conversion. Everything runs locally and is independent of the web server, so it can be deployed as a static site. [Live Demo](https://pkg.cdsp.us.ci)
 
 ## Features
 
-- Drag & drop / file picker for `.pkg` files, up to roughly 2GB (parsing reads only the table of contents; the archive never sits in memory)
+- Drag & drop / file picker for `.pkg` / `.mpkg` files, up to roughly 2GB (parsing reads only the table of contents; the archive never sits in memory)
 - Entry list + image/video thumbnail previews + full-size modal viewer
 - Automatic `.tex → jpg/png/mp4` conversion (can be disabled; when disabled, `.tex` files are exported as-is)
 - Animated textures (`.tex` with a frame table) are re-encoded into a single **APNG** (lossless, keeps alpha) or **GIF** (256 colours, small), or both
@@ -80,5 +80,5 @@ npm run dev        # http://localhost:5199
 
 - Workshop-encrypted packages (`PKG ` v1/v2) are not supported yet; planned for phase two
 - No audio/video formats beyond `.webm` / `.mp4`
-- PKGV stores entry offsets as int32, so a **package larger than 2GB cannot exist** in this format; such files are rejected outright
+- PKGV (desktop `.pkg`) / PKGM (Android `.mpkg`) stores entry offsets as int32, so a **package larger than 2GB cannot exist** in this format; such files are rejected outright
 - A single re-encoded animation larger than 200MB falls back to the first frame as PNG, with a dialog explaining why

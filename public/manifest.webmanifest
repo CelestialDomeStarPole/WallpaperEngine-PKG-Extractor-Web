@@ -1,7 +1,7 @@
 {
   "name": "Wallpaper Engine PKG 提取器",
   "short_name": "PKG 提取器",
-  "description": "纯浏览器本地解析 .pkg 壁纸包",
+  "description": "纯浏览器本地解析 .pkg / .mpkg 壁纸包",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a1018",

@@ -53,7 +53,7 @@ async function handle(msg: InMsg): Promise<void> {
   }
   if (msg.type === 'open') {
     if (msg.file.size > LIMITS.pkgFormatCeiling) {
-      throw new Error(`文件 ${(msg.file.size / 1024 / 1024 / 1024).toFixed(2)} GB：PKGV 的偏移字段是 int32，这个格式存不下超过 2GB 的包`);
+      throw new Error(`文件 ${(msg.file.size / 1024 / 1024 / 1024).toFixed(2)} GB：PKG 的偏移字段是 int32，这个格式存不下超过 2GB 的包`);
     }
     const source = new FileByteSource(msg.file);
     const head = await source.read(0, LIMITS.detectProbe, 'magic');
@@ -63,7 +63,7 @@ async function handle(msg: InMsg): Promise<void> {
       throw new Error(
         magic === 'PKG '
           ? '检测到 Workshop 加密格式（PKG v1/v2），当前版本暂不支持，第二期将提供。'
-          : '无法识别的文件格式：不是明文 PKGV 容器。',
+          : '无法识别的文件格式：不是明文 PKGV / PKGM 容器。',
       );
     }
     pkg = await adapter.parse(source);

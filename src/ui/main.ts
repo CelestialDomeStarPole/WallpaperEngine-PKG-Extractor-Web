@@ -367,12 +367,12 @@ function endRun() {
 
 // —— 拖拽 / 选择 ——
 function handleFile(file: File) {
-  if (!/\.(pkg)$/i.test(file.name)) {
-    setStatus('仅支持 .pkg 文件', 'err');
+  if (!/\.(pkg|mpkg)$/i.test(file.name)) {
+    setStatus('仅支持 .pkg / .mpkg 文件', 'err');
     return;
   }
   if (file.size > LIMITS.pkgFormatCeiling) {
-    const why = `${fmtSize(file.size)}：PKGV 目录表的偏移字段是 int32，这个格式本身存不下超过 ${fmtSize(LIMITS.pkgFormatCeiling)} 的包`;
+    const why = `${fmtSize(file.size)}：PKG 目录表的偏移字段是 int32，这个格式本身存不下超过 ${fmtSize(LIMITS.pkgFormatCeiling)} 的包`;
     setStatus(why, 'err');
     showNotice('这个包大到格式层面就无法解析', [why]);
     return;

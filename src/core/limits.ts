@@ -2,7 +2,7 @@ const MB = 1024 * 1024;
 
 /** 所有可调上限集中在这里，别处不许再散着写魔数 */
 export const LIMITS = {
-  // —— 容器（PKGV 目录表）——
+  // —— 容器（PKGV / PKGM 目录表）——
   maxEntries: 100_000,
   maxNameLen: 255,
   /** 探测格式用的读头字节数，只需覆盖 magic */

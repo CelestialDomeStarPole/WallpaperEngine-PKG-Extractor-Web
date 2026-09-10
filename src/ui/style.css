@@ -14,6 +14,9 @@
 
 * { box-sizing: border-box; }
 
+/* 组件里的 display:flex / grid 会压过 UA 的 [hidden]{display:none}，统一兜住这一层 */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -142,7 +145,6 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 
 /* —— 进度条 —— */
 .progress { display: flex; align-items: center; gap: 12px; margin: 14px 0 0; padding: 10px 16px; border-radius: var(--lg-r-pill); font-size: 12.5px; color: var(--muted); background: rgba(8, 13, 20, 0.44); border: 1px solid var(--lg-hairline); backdrop-filter: blur(10px) saturate(150%); }
-.progress[hidden] { display: none; }
 .progress-track { position: relative; flex: 1; height: 6px; border-radius: 999px; overflow: hidden; background: rgba(4, 8, 14, 0.6); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5); }
 .progress-bar { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 999px; background: linear-gradient(90deg, #7cc4ff, #b9e8ff); box-shadow: 0 0 12px var(--lg-glow); }
 .progress.indeterminate .progress-bar { width: 34% !important; animation: slide 1.25s var(--ease) infinite; }
@@ -173,15 +175,12 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
   box-shadow: 0 12px 28px -14px rgba(2, 6, 12, 0.85);
   backdrop-filter: blur(12px) saturate(160%);
 }
-/* display:flex 会压过 [hidden] 的默认 display:none */
-.selbar[hidden] { display: none; }
 .sel-summary { margin: 0; flex: 1 1 auto; font-size: 13px; text-shadow: var(--ink-shadow); }
 .sel-summary .sep { color: var(--faint); margin: 0 6px; }
 .sel-kind { color: var(--muted); }
 .sel-kind b { color: var(--accent); font-weight: 700; margin-inline-start: 3px; font-variant-numeric: tabular-nums; }
 .sel-state { color: var(--accent); font-variant-numeric: tabular-nums; }
 .sel-hint { flex: 1 0 100%; margin: 0; font-size: 12px; color: var(--warn); }
-.sel-hint[hidden] { display: none; }
 .sel-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
 
 /* —— 面包屑 —— */
@@ -254,7 +253,6 @@ body:not(.motion-off) .folder:hover { transform: translateY(-2px); }
   position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 24px;
   background: rgba(3, 7, 12, 0.55); backdrop-filter: blur(14px) saturate(140%);
 }
-.modal[hidden] { display: none; }
 .modal-body { position: relative; max-width: 92vw; max-height: 92vh; padding: 10px; }
 .modal-body img, .modal-body video { max-width: 90vw; max-height: 86vh; display: block; border-radius: var(--lg-r-sm); }
 .modal-body pre { max-width: 80vw; max-height: 80vh; overflow: auto; margin: 0; padding: 14px; font-size: 12px; background: rgba(6, 11, 18, 0.72); border-radius: var(--lg-r-sm); }
@@ -281,7 +279,6 @@ body:not(.motion-off) .folder:hover { transform: translateY(-2px); }
 }
 .dock-toggle-icon { width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(180deg, #d7ecff, #58a7ee); box-shadow: 0 0 10px var(--lg-glow); }
 .dock-body { padding: 2px 16px 16px; display: flex; flex-direction: column; gap: 14px; }
-.dock-body[hidden] { display: none; }
 .dock-group { display: flex; flex-direction: column; gap: 8px; }
 .dock-label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .dock-switches { flex-direction: column; align-items: flex-start; gap: 9px; }
