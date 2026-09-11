@@ -10,7 +10,7 @@ Parses Wallpaper Engine `.pkg` (desktop) / `.mpkg` (Android) wallpaper packages 
 
 ## Features
 
-- Drag & drop / file picker for `.pkg` / `.mpkg` files, up to roughly 2GB (parsing reads only the table of contents; the archive never sits in memory)
+- Drag & drop / file picker / Ctrl+V paste for `.pkg` / `.mpkg` files, up to roughly 2GB (parsing reads only the table of contents; the archive never sits in memory)
 - Entry list + image/video thumbnail previews + full-size modal viewer
 - Automatic `.tex → jpg/png/mp4` conversion (can be disabled; when disabled, `.tex` files are exported as-is)
 - Animated textures (`.tex` with a frame table) are re-encoded into a single **APNG** (lossless, keeps alpha) or **GIF** (256 colours, small), or both
