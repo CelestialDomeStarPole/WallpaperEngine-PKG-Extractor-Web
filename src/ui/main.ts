@@ -1,5 +1,6 @@
 import './style.css';
 import type { BlobVariant, DecodeOptions, ItemKind, WallpaperMeta } from '../core/types';
+import { detectAdapter } from '../core/adapter';
 import { LIMITS } from '../core/limits';
 import { ZipWriter, entryName, uniqueKey } from '../core/zipstream';
 import { createGlassController } from './glass';
@@ -365,9 +366,20 @@ function endRun() {
   flushNotices();
 }
 
-// —— 拖拽 / 选择 ——
-function handleFile(file: File) {
-  if (!/\.(pkg|mpkg)$/i.test(file.name)) {
+// —— 拖拽 / 选择 / 粘贴 ——
+/** 扩展名优先，对不上再看头几个字节的 magic：改名或粘贴来的包也能认出来 */
+async function isPkgFile(file: File): Promise<boolean> {
+  if (/\.(pkg|mpkg)$/i.test(file.name)) return true;
+  try {
+    const head = new Uint8Array(await file.slice(0, LIMITS.detectProbe).arrayBuffer());
+    return detectAdapter(head) !== null;
+  } catch {
+    return false;
+  }
+}
+
+async function handleFile(file: File) {
+  if (!(await isPkgFile(file))) {
     setStatus('仅支持 .pkg / .mpkg 文件', 'err');
     return;
   }
@@ -397,11 +409,27 @@ dropzone.addEventListener('drop', (e) => {
   e.preventDefault();
   dropzone.classList.remove('over');
   const f = e.dataTransfer?.files?.[0];
-  if (f) handleFile(f);
+  if (f) void handleFile(f);
 });
 fileInput.addEventListener('change', () => {
   const f = fileInput.files?.[0];
-  if (f) handleFile(f);
+  if (f) void handleFile(f);
+});
+
+/** 剪贴板里的第一个文件：资源管理器复制文件后 Ctrl+V 走的就是这条路 */
+function clipboardFile(dt: DataTransfer | null): File | null {
+  if (!dt) return null;
+  if (dt.files?.length) return dt.files[0];
+  for (const item of dt.items) if (item.kind === 'file') return item.getAsFile();
+  return null;
+}
+
+window.addEventListener('paste', (e) => {
+  const file = clipboardFile(e.clipboardData);
+  // 剪贴板里没有文件（比如纯文本）就什么都不做，交回浏览器默认行为
+  if (!file) return;
+  e.preventDefault();
+  void handleFile(file);
 });
 
 // —— 元数据卡片 ——
