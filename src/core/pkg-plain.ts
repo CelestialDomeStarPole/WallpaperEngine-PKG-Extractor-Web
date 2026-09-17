@@ -9,6 +9,11 @@ const MAGIC_RE = /^PKG[VM]\d{4}$/;
 /** 目录表一条记录至少 = 4(名长) + 1(名) + 4(偏移) + 4(长度) */
 const MIN_RECORD = 13;
 
+/** 摘掉绝对路径前缀与 . / .. 段：名字会直接进导出文件名与 ZIP 条目名 */
+function safeEntryName(raw: string): string {
+  return raw.split(/[\\/]+/).filter((seg) => seg && seg !== '.' && seg !== '..').join('/');
+}
+
 export function detectPlain(bytes: Uint8Array): boolean {
   if (bytes.length < 12) return false;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -46,7 +51,8 @@ export async function parsePlain(source: ByteSource): Promise<PkgFile> {
     }
     const entries: PkgEntry[] = [];
     for (let i = 0; i < entryCount; i++) {
-      const name = r.lengthString(LIMITS.maxNameLen, `entry[${i}].name`);
+      const raw = r.lengthString(LIMITS.maxNameLen, `entry[${i}].name`);
+      const name = safeEntryName(raw) || `entry[${i}]`;
       const offset = r.i32(`entry[${i}].offset`);
       const length = r.i32(`entry[${i}].length`);
       if (offset < 0 || length < 0) {

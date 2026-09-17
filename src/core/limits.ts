@@ -4,7 +4,8 @@ const MB = 1024 * 1024;
 export const LIMITS = {
   // —— 容器（PKGV / PKGM 目录表）——
   maxEntries: 100_000,
-  maxNameLen: 255,
+  /** 条目名上限（i32 长度前缀的 UTF-8）：真实包里 266 字节的中文长标题是合法的，这里只挡畸形头 */
+  maxNameLen: 1024,
   /** 探测格式用的读头字节数，只需覆盖 magic */
   detectProbe: 64,
   /** 目录表逐级加宽的探测步长 */
