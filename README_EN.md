@@ -12,7 +12,7 @@ Parses Wallpaper Engine `.pkg` (desktop) / `.mpkg` (Android) wallpaper packages 
 
 - Drag & drop / file picker / Ctrl+V paste for `.pkg` / `.mpkg` files, up to roughly 2GB (parsing reads only the table of contents; the archive never sits in memory)
 - Entry list + image/video thumbnail previews + full-size modal viewer
-- Automatic `.tex → jpg/png/mp4` conversion (can be disabled; when disabled, `.tex` files are exported as-is)
+- Automatic `.tex → jpg/png/mp4` conversion (can be disabled; when disabled, `.tex` files are exported as-is); video textures (a TEX wrapping an mp4) are passed through zero-copy as `.mp4`
 - Selectable texture mip levels: top resolution only by default, or tick lower levels to export them too (suffixed `.mipN`)
 - Animated textures (`.tex` with a frame table) are re-encoded into a single **APNG** (lossless, keeps alpha) or **GIF** (256 colours, small), or both
 - Multi-select cards: bulk download the selection, or ZIP it
@@ -24,7 +24,7 @@ Parses Wallpaper Engine `.pkg` (desktop) / `.mpkg` (Android) wallpaper packages 
 ```bash
 cd we-pkg-web
 npm install
-npm run dev        # http://localhost:5199
+npm run dev
 ```
 
 ## Pages Deployment
