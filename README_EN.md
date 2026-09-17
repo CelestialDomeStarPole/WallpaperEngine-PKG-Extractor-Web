@@ -13,6 +13,7 @@ Parses Wallpaper Engine `.pkg` (desktop) / `.mpkg` (Android) wallpaper packages 
 - Drag & drop / file picker / Ctrl+V paste for `.pkg` / `.mpkg` files, up to roughly 2GB (parsing reads only the table of contents; the archive never sits in memory)
 - Entry list + image/video thumbnail previews + full-size modal viewer
 - Automatic `.tex → jpg/png/mp4` conversion (can be disabled; when disabled, `.tex` files are exported as-is)
+- Selectable texture mip levels: top resolution only by default, or tick lower levels to export them too (suffixed `.mipN`)
 - Animated textures (`.tex` with a frame table) are re-encoded into a single **APNG** (lossless, keeps alpha) or **GIF** (256 colours, small), or both
 - Multi-select cards: bulk download the selection, or ZIP it
 - Single file download / streaming ZIP export preserving directory structure
@@ -82,3 +83,4 @@ npm run dev        # http://localhost:5199
 - No audio/video formats beyond `.webm` / `.mp4`
 - PKGV (desktop `.pkg`) / PKGM (Android `.mpkg`) stores entry offsets as int32, so a **package larger than 2GB cannot exist** in this format; such files are rejected outright
 - A single re-encoded animation larger than 200MB falls back to the first frame as PNG, with a dialog explaining why
+- Animated textures always export the top mip level (re-encoding works on the whole sprite sheet); the level selection does not affect them
