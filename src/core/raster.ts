@@ -1,4 +1,5 @@
 import { decompressDxt, rg88ToRgba, r8ToRgba, rgba8888ToRgba } from './dxt';
+import { LIMITS } from './limits';
 import { Fif, isEncodedImageFormat, readMipmapBytes } from './tex';
 import type { DecodePorts, Raster, TexFile } from './types';
 
@@ -37,6 +38,10 @@ export async function rasterOfImage(tex: TexFile, image: number, ports: DecodePo
     }
     const mime = ENCODED_MIME[tex.imageFormat] ?? 'image/*';
     return ports.decodeRaster(await readMipmapBytes(tex, image, mip), mime);
+  }
+  const need = m.width * m.height * 4;
+  if (need > LIMITS.maxSurfaceBytes) {
+    throw new Error(`原始纹理 ${m.width}x${m.height} 解码需要 ${need} 字节，超过上限 ${LIMITS.maxSurfaceBytes}`);
   }
   const bytes = await readMipmapBytes(tex, image, mip);
   return cropToImage(tex, decodeRawTexToRgba(tex, bytes, m.width, m.height), m.width, m.height);

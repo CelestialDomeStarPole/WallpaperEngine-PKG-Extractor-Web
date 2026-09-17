@@ -52,6 +52,10 @@ function readMipmap(r: BinReader, layout: 1 | 2 | 4): TexMipmap {
   const isLz4 = r.i32('mip.isLz4') === 1;
   const dlen = r.i32('mip.dlen');
   const blen = r.i32('mip.len');
+  // 解压目标是文件说了算的，得在 lz4Decompress 分配之前挡住
+  if (isLz4 && (dlen < 0 || dlen > LIMITS.maxDecompressedMipmapBytes)) {
+    throw new Error(`mipmap 解压后长度异常: ${dlen}`);
+  }
   const start = recordMip(r, blen);
   const m: TexMipmap = { width, height, isLz4, decompressedLength: dlen, start, length: blen };
   if (isV4Prefix && !isLz4) m.decompressedLength = blen;

@@ -1,4 +1,6 @@
 const MB = 1024 * 1024;
+/** 目录表偏移与 mip 长度字段都是 int32，超过这个数容器本身无法表达 */
+const FORMAT_CEILING = 0x7fff_ffff;
 
 /** 所有可调上限集中在这里，别处不许再散着写魔数 */
 export const LIMITS = {
@@ -11,8 +13,7 @@ export const LIMITS = {
   /** 目录表逐级加宽的探测步长 */
   tocProbeSteps: [64 * 1024, 1 * MB, 4 * MB, 32 * MB],
   tocProbeMax: 32 * MB,
-  /** 目录表偏移/长度是 int32，超过这个数容器本身就无法表达 */
-  pkgFormatCeiling: 0x7fff_ffff,
+  pkgFormatCeiling: FORMAT_CEILING,
   /** 只提示不拒绝 */
   softSizeWarn: 1536 * MB,
   /** 单次底层读取的分片大小，杜绝一口气读几个 GB */
@@ -20,7 +21,10 @@ export const LIMITS = {
   metaJsonMaxRead: 512 * 1024,
 
   // —— TEX ——
-  maxMipmapBytes: 250 * MB,
+  /** 单条 mipmap 的字节上限：等于容器格式上限（实测有 515MB 的视频纹理，物理存在性由 record() 的流尾边界检查兜底） */
+  maxMipmapBytes: FORMAT_CEILING,
+  /** LZ4 解压目标长度（dlen 完全由文件声明）的上限：超过就拒绝，别让畸形头直接分配几个 GB */
+  maxDecompressedMipmapBytes: 512 * MB,
   maxImages: 100,
   maxMipmaps: 32,
   maxFrames: 100_000,
@@ -28,7 +32,7 @@ export const LIMITS = {
   texProbeMax: 8 * MB,
 
   // —— 动画重编码 ——
-  /** 合成画布 W*H*4 的上限 */
+  /** 一次解码的 RGBA 输出上限：动画合成画布，以及单张原始纹理解码分配 */
   maxSurfaceBytes: 512 * MB,
   /** 单个重编码输出（APNG/GIF）的上限，超了回退单帧 PNG */
   maxAnimationBytes: 200 * MB,

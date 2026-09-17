@@ -53,6 +53,15 @@ function mipName(base: string, ext: string, mip: number): string {
 }
 
 /**
+ * 视频纹理：payload 是一整段 mp4。
+ * imageFormat 可能显式标成 MP4，也可能标成 UNKNOWN 而靠 flags 的 IsVideoTexture 位（实测样本属于后者）。
+ */
+function isVideoTexture(tex: TexFile): boolean {
+  return tex.imageFormat === Fif.MP4
+    || (tex.imageFormat === Fif.UNKNOWN && (tex.flags & TexFlags.IsVideoTexture) !== 0);
+}
+
+/**
  * 单个 .tex 的主输出，按 mips 给的层级各出一条。
  * 编码类（内嵌 jpg/png）每层都是独立的完整图片，零拷贝直通；原始类逐层解码成 PNG。
  */
@@ -65,7 +74,7 @@ export async function texOutputs(
   for (const mip of levels) {
     const m = tex.images[0]?.[mip];
     if (!m) continue; // 这张贴图没有这一层级就跳过
-    if (tex.imageFormat === Fif.MP4) {
+    if (isVideoTexture(tex)) {
       // 视频纹理只有一个逻辑层级，低层级没有意义
       if (mip === 0) {
         out.push({
@@ -131,7 +140,7 @@ export function isAnimatedTex(tex: TexFile): boolean {
 
 /** 原始纹理格式本地就能解码；内嵌编码帧必须有宿主提供的 decodeRaster */
 function canReencode(tex: TexFile, ports: DecodePorts): boolean {
-  if (tex.imageFormat === Fif.MP4) return false;
+  if (isVideoTexture(tex)) return false;
   return !isEncodedImageFormat(tex.imageFormat) || !!ports.decodeRaster;
 }
 
