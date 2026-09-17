@@ -2,7 +2,7 @@ import { ApngWriter } from './apng';
 import type { FrameMeta, FrameSink } from './framesink';
 import { GifWriter } from './gif';
 import { LIMITS } from './limits';
-import { rasterOfImage } from './raster';
+import { rasterOfImageRaw } from './raster';
 import type { AnimatedFormat, DecodePorts, Raster, TexFile, TexFrame } from './types';
 
 export interface Surface {
@@ -138,7 +138,7 @@ export class FrameSource {
 
   private async image(index: number): Promise<Raster> {
     if (!this.cached || this.cached.index !== index) {
-      this.cached = { index, raster: await rasterOfImage(this.tex, index, this.ports) };
+      this.cached = { index, raster: await rasterOfImageRaw(this.tex, index, this.ports) };
       this.decoded += 1;
     }
     return this.cached.raster;

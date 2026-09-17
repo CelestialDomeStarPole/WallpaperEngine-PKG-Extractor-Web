@@ -28,8 +28,12 @@ export function cropToImage(tex: TexFile, rgba: Uint8Array, w: number, h: number
   return { width: tex.imageWidth, height: tex.imageHeight, rgba: cropped };
 }
 
-/** 一个 image 指定层级的栅格化：内嵌编码格式走宿主解码，原始格式走本地解码 */
-export async function rasterOfImage(tex: TexFile, image: number, ports: DecodePorts, mip = 0): Promise<Raster> {
+/**
+ * 一个 image 指定层级的原始栅格化，**不裁剪**。
+ * 帧矩形是雪碧图坐标系里的格子，动画取样必须拿到整张图；imageWidth/Height 只是对外
+ * 声明的逻辑尺寸（实测有一个 480x300/2048x1024 的样本，拿它裁会把整张雪碧图切掉）。
+ */
+export async function rasterOfImageRaw(tex: TexFile, image: number, ports: DecodePorts, mip = 0): Promise<Raster> {
   const m = tex.images[image]?.[mip];
   if (!m) throw new Error(`引用了不存在的 image ${image} mip ${mip}`);
   if (isEncodedImageFormat(tex.imageFormat) && tex.imageFormat !== Fif.MP4) {
@@ -44,7 +48,17 @@ export async function rasterOfImage(tex: TexFile, image: number, ports: DecodePo
     throw new Error(`原始纹理 ${m.width}x${m.height} 解码需要 ${need} 字节，超过上限 ${LIMITS.maxSurfaceBytes}`);
   }
   const bytes = await readMipmapBytes(tex, image, mip);
-  return cropToImage(tex, decodeRawTexToRgba(tex, bytes, m.width, m.height), m.width, m.height);
+  return {
+    width: m.width,
+    height: m.height,
+    rgba: decodeRawTexToRgba(tex, bytes, m.width, m.height),
+  };
+}
+
+/** 单图导出用：再按 imageWidth/Height 裁到逻辑尺寸（repkg 行为） */
+export async function rasterOfImage(tex: TexFile, image: number, ports: DecodePorts, mip = 0): Promise<Raster> {
+  const r = await rasterOfImageRaw(tex, image, ports, mip);
+  return cropToImage(tex, r.rgba, r.width, r.height);
 }
 
 const ENCODED_MIME: Record<number, string> = {

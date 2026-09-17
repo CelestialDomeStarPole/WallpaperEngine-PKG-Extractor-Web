@@ -1,3 +1,5 @@
+import type { ByteSource } from './bytesource';
+
 const utf8Decoder = new TextDecoder('utf-8');
 
 /** 探针没覆盖到：不是错误，是「再多读点」的信号 */
@@ -108,5 +110,72 @@ export class BinReader {
       s += String.fromCharCode(c);
     }
     throw new Error(`${what} 在 ${maxLen} 字节内未找到终止符（位置 ${this.pos - s.length}）`);
+  }
+}
+
+/**
+ * 从 ByteSource 按需取小窗口的字段读取器。
+ * 给「记录之间夹着大块内联数据」的格式用（TEX 的 mip 像素就内联在记录之间，
+ * 读下一条记录要跨过几十 MB）：skip() 只校验边界、不读一个字节，字段落在窗口外时
+ * 才在当前位置重开一小段。游标是绝对偏移，上限用源长度，语义与 BinReader 一致。
+ */
+export class SlidingBinReader {
+  private buf: Uint8Array = new Uint8Array(0);
+  /** buf 覆盖的绝对起点 */
+  private bufAt = 0;
+  private pos = 0;
+
+  constructor(private readonly src: ByteSource, private readonly window: number) {}
+
+  get offset(): number {
+    return this.pos;
+  }
+
+  /** 跳过 n 字节（比如 mip 数据），不做任何读取 */
+  skip(n: number, what = 'bytes'): void {
+    if (n < 0 || this.pos + n > this.src.size) {
+      throw new Error(`数据不完整：位置 ${this.pos} 需要 ${n} 字节（${what}），流尾 ${this.src.size}`);
+    }
+    this.pos += n;
+  }
+
+  async i32(what = 'int32'): Promise<number> {
+    const at = await this.ensure(4, what);
+    const v = new DataView(this.buf.buffer, this.buf.byteOffset).getInt32(at, true);
+    this.pos += 4;
+    return v;
+  }
+
+  async f32(what = 'float32'): Promise<number> {
+    const at = await this.ensure(4, what);
+    const v = new DataView(this.buf.buffer, this.buf.byteOffset).getFloat32(at, true);
+    this.pos += 4;
+    return v;
+  }
+
+  /** NUL 结尾定长区串，最多窥 maxLen 字节 */
+  async nullString(maxLen: number, what = 'nstring'): Promise<string> {
+    let s = '';
+    for (let i = 0; i < maxLen; i++) {
+      const at = await this.ensure(1, what);
+      const c = this.buf[at];
+      this.pos += 1;
+      if (c === 0) return s;
+      s += String.fromCharCode(c);
+    }
+    throw new Error(`${what} 在 ${maxLen} 字节内未找到终止符（位置 ${this.pos - s.length}）`);
+  }
+
+  /** 让 [pos, pos+n) 落在缓冲里，返回它在缓冲内的下标 */
+  private async ensure(n: number, what: string): Promise<number> {
+    const at = this.pos - this.bufAt;
+    if (at >= 0 && at + n <= this.buf.length) return at;
+    if (n < 0 || this.pos + n > this.src.size) {
+      throw new Error(`数据不完整：位置 ${this.pos} 需要 ${n} 字节（${what}），流尾 ${this.src.size}`);
+    }
+    const len = Math.min(Math.max(n, this.window), this.src.size - this.pos);
+    this.buf = await this.src.read(this.pos, len, what);
+    this.bufAt = this.pos;
+    return 0;
   }
 }

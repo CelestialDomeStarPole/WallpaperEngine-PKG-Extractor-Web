@@ -28,8 +28,11 @@ export const LIMITS = {
   maxImages: 100,
   maxMipmaps: 32,
   maxFrames: 100_000,
-  texProbeSteps: [32 * 1024, 256 * 1024, 2 * MB, 8 * MB],
-  texProbeMax: 8 * MB,
+  /**
+   * TEX 字段读取的滑窗大小。mip 数据内联在记录之间，读下一条记录时不能要求
+   * 整段连续（6 张 image 的贴图里记录被 8MB 像素隔开），只能按当前位置重开一小段。
+   */
+  texWindow: 4 * 1024,
 
   // —— 动画重编码 ——
   /** 一次解码的 RGBA 输出上限：动画合成画布，以及单张原始纹理解码分配 */

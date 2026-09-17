@@ -2,7 +2,7 @@ import { animationJob, animationSurface, estimateAnimationBytes, formatsOf, Fram
 import { LIMITS } from './limits';
 import { parseProjectMeta } from './metadata';
 import { encodePng } from './png';
-import { ENCODED_EXT, rasterOfImage } from './raster';
+import { ENCODED_EXT, rasterOfImage, rasterOfImageRaw } from './raster';
 import { Fif, TexFlags, isEncodedImageFormat, parseTex, readMipmapBlob } from './tex';
 import type { BlobVariant, DecodeOptions, DecodePorts, ExtractItem, ItemKind, PkgFile, Raster, TexFile, WallpaperMeta } from './types';
 
@@ -119,8 +119,8 @@ export async function legacyFrameOutputs(tex: TexFile, sourceName: string, ports
   const count = Math.min(tex.frames.length, LEGACY_FRAME_CAP);
   for (let i = 0; i < count; i++) {
     try {
-      // 帧用 imageId 索引自己的 image，不是循环下标
-      const raster: Raster = await rasterOfImage(tex, tex.frames[i].imageId, ports);
+      // 帧用 imageId 索引自己的 image，不是循环下标；不裁剪，方便逐帧核对矩形
+      const raster: Raster = await rasterOfImageRaw(tex, tex.frames[i].imageId, ports);
       const png = encodePng(raster.rgba, raster.width, raster.height);
       out.push({
         name: `${base}.frame${String(i).padStart(3, '0')}.png`,
