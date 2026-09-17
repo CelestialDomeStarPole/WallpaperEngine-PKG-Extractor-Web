@@ -27,19 +27,19 @@ export function cropToImage(tex: TexFile, rgba: Uint8Array, w: number, h: number
   return { width: tex.imageWidth, height: tex.imageHeight, rgba: cropped };
 }
 
-/** 一个 image 栅格化：内嵌编码格式走宿主解码，原始格式走本地解码 */
-export async function rasterOfImage(tex: TexFile, image: number, ports: DecodePorts): Promise<Raster> {
-  const mip = tex.images[image]?.[0];
-  if (!mip) throw new Error(`引用了不存在的 image ${image}`);
+/** 一个 image 指定层级的栅格化：内嵌编码格式走宿主解码，原始格式走本地解码 */
+export async function rasterOfImage(tex: TexFile, image: number, ports: DecodePorts, mip = 0): Promise<Raster> {
+  const m = tex.images[image]?.[mip];
+  if (!m) throw new Error(`引用了不存在的 image ${image} mip ${mip}`);
   if (isEncodedImageFormat(tex.imageFormat) && tex.imageFormat !== Fif.MP4) {
     if (!ports.decodeRaster) {
       throw new Error(`需要解码内嵌帧（FreeImage 格式 ${tex.imageFormat}），当前环境没有解码能力`);
     }
     const mime = ENCODED_MIME[tex.imageFormat] ?? 'image/*';
-    return ports.decodeRaster(await readMipmapBytes(tex, image), mime);
+    return ports.decodeRaster(await readMipmapBytes(tex, image, mip), mime);
   }
-  const bytes = await readMipmapBytes(tex, image);
-  return cropToImage(tex, decodeRawTexToRgba(tex, bytes, mip.width, mip.height), mip.width, mip.height);
+  const bytes = await readMipmapBytes(tex, image, mip);
+  return cropToImage(tex, decodeRawTexToRgba(tex, bytes, m.width, m.height), m.width, m.height);
 }
 
 const ENCODED_MIME: Record<number, string> = {

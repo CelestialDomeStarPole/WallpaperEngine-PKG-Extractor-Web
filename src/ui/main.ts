@@ -12,7 +12,7 @@ interface ItemSummary {
   mime: string; bytes: number; estimated?: boolean; poster?: boolean; warning?: string;
 }
 type OutMsg =
-  | { type: 'parsed'; magic: string; items: ItemSummary[]; meta?: WallpaperMeta }
+  | { type: 'parsed'; magic: string; items: ItemSummary[]; meta?: WallpaperMeta; maxMip: number }
   | { type: 'error'; message: string }
   | { type: 'blob'; id: number; variant: BlobVariant; blob: Blob; bytes: number; patch?: ItemPatch };
 
@@ -46,6 +46,8 @@ const zipScope = $<HTMLSelectElement>('#opt-zip-scope');
 const optTex = $<HTMLInputElement>('#opt-tex');
 const animatedFormat = $<HTMLSelectElement>('#opt-animated');
 const animatedField = $<HTMLElement>('#field-animated');
+const mipField = $<HTMLElement>('#field-mips');
+const mipList = $<HTMLElement>('#mip-list');
 const zipBtn = $<HTMLButtonElement>('#btn-zip');
 const selbar = $<HTMLElement>('#selbar');
 const selSummary = $<HTMLElement>('#sel-summary');
@@ -158,6 +160,7 @@ worker.onmessage = (ev: MessageEvent<OutMsg>) => {
     result.hidden = false;
     progress.finish(`解析完成 · ${msg.items.length} 个条目`);
     renderMeta(msg.meta, msg.items);
+    renderMipChoices(msg.maxMip);
     fillZipScope();
     render();
     renderSelbar();
@@ -184,6 +187,7 @@ function currentOptions(): DecodeOptions {
   return {
     texToImage: optTex.checked,
     animatedFormat: animatedFormat.value as DecodeOptions['animatedFormat'],
+    mipLevels: checkedMips(),
     legacyFrames: new URLSearchParams(location.search).get('legacyFrames') === '1',
   };
 }
@@ -901,7 +905,40 @@ function reparse() {
 
 function syncOptionVisibility() {
   animatedField.hidden = !($<HTMLInputElement>('#opt-tex')).checked;
+  mipField.hidden = animatedField.hidden || !mipList.children.length;
 }
+
+/** 已勾选的 mip 层级，升序 */
+function checkedMips(): number[] {
+  return [...mipList.querySelectorAll<HTMLInputElement>('input[data-mip]')]
+    .filter((el) => el.checked)
+    .map((el) => Number(el.dataset.mip));
+}
+
+/** 层级数由包内实际最深的 mip 链决定，重建时保留用户已勾选项，默认只勾最高层 */
+function renderMipChoices(maxMip: number) {
+  const levels = maxMip > 1 ? maxMip : 0;
+  const keep = checkedMips().filter((i) => i < levels);
+  const chosen = new Set(keep.length ? keep : [0]);
+  mipList.innerHTML = '';
+  for (let i = 0; i < levels; i++) {
+    const label = document.createElement('label');
+    label.className = 'mip';
+    label.title = i === 0 ? '原始分辨率' : `约 1/${2 ** i} 分辨率`;
+    label.innerHTML = `<input type="checkbox" data-mip="${i}"${chosen.has(i) ? ' checked' : ''} /><span>第 ${i + 1} 层</span>`;
+    mipList.append(label);
+  }
+  syncOptionVisibility();
+}
+
+mipList.addEventListener('change', () => {
+  // 一个都不勾时回到最高层，免得选项和实际导出对不上
+  if (!checkedMips().length) {
+    const first = mipList.querySelector<HTMLInputElement>('input[data-mip="0"]');
+    if (first) first.checked = true;
+  }
+  reparse();
+});
 
 for (const el of [optTex, animatedFormat]) {
   el.addEventListener('change', () => {

@@ -102,6 +102,8 @@ export type AnimatedFormat = 'apng' | 'gif' | 'both';
 export interface DecodeOptions {
   texToImage: boolean;
   animatedFormat: AnimatedFormat;
+  /** 要导出的 mip 层级，0 = 最高分辨率；缺省/空数组 = 只要最高层 */
+  mipLevels?: number[];
   /** 调试用：强制走「每帧一张 PNG」，用来核对真实包的帧矩形与时间语义 */
   legacyFrames?: boolean;
 }

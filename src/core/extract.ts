@@ -47,31 +47,57 @@ export interface TexOutcome {
   make(variant?: BlobVariant): Promise<Blob>;
 }
 
-/** 单个 .tex 的主输出：编码类零拷贝直通，原始类解码成 PNG */
-export async function texToPrimaryOutput(tex: TexFile, sourceName: string): Promise<TexOutcome> {
-  const base = texBaseName(sourceName);
-  const mip0 = tex.images[0]?.[0];
-  if (!mip0) throw new Error('TEX 无 mipmap');
+/** 输出名：最高层保持原名，低层级带 .mipN 后缀 */
+function mipName(base: string, ext: string, mip: number): string {
+  return mip === 0 ? `${base}.${ext}` : `${base}.mip${mip}.${ext}`;
+}
 
-  if (tex.imageFormat === Fif.MP4) {
-    return {
-      name: `${base}.mp4`, mime: 'video/mp4', kind: 'video', bytes: mip0.length,
-      make: memo(() => readMipmapBlob(tex, 0)),
-    };
+/**
+ * 单个 .tex 的主输出，按 mips 给的层级各出一条。
+ * 编码类（内嵌 jpg/png）每层都是独立的完整图片，零拷贝直通；原始类逐层解码成 PNG。
+ */
+export async function texOutputs(
+  tex: TexFile, sourceName: string, mips: number[], ports: DecodePorts = {},
+): Promise<TexOutcome[]> {
+  const base = texBaseName(sourceName);
+  const levels = mips.length ? mips : [0];
+  const out: TexOutcome[] = [];
+  for (const mip of levels) {
+    const m = tex.images[0]?.[mip];
+    if (!m) continue; // 这张贴图没有这一层级就跳过
+    if (tex.imageFormat === Fif.MP4) {
+      // 视频纹理只有一个逻辑层级，低层级没有意义
+      if (mip === 0) {
+        out.push({
+          name: `${base}.mp4`, mime: 'video/mp4', kind: 'video', bytes: m.length,
+          make: memo(() => readMipmapBlob(tex, 0, mip)),
+        });
+      }
+      continue;
+    }
+    if (isEncodedImageFormat(tex.imageFormat)) {
+      const ext = ENCODED_EXT[tex.imageFormat] ?? 'img';
+      out.push({
+        name: mipName(base, ext, mip), mime: EXT_MIME[ext] ?? 'application/octet-stream', kind: 'image',
+        bytes: m.length, make: memo(() => readMipmapBlob(tex, 0, mip)),
+      });
+      continue;
+    }
+    const raster = await rasterOfImage(tex, 0, ports, mip);
+    const png = encodePng(raster.rgba, raster.width, raster.height);
+    out.push({
+      name: mipName(base, 'png', mip), mime: 'image/png', kind: 'image', bytes: png.length,
+      make: memo(async () => blobOf(png, 'image/png')),
+    });
   }
-  if (isEncodedImageFormat(tex.imageFormat)) {
-    const ext = ENCODED_EXT[tex.imageFormat] ?? 'img';
-    return {
-      name: `${base}.${ext}`, mime: EXT_MIME[ext] ?? 'application/octet-stream', kind: 'image',
-      bytes: mip0.length, make: memo(() => readMipmapBlob(tex, 0)),
-    };
-  }
-  const raster = await rasterOfImage(tex, 0, {});
-  const png = encodePng(raster.rgba, raster.width, raster.height);
-  return {
-    name: `${base}.png`, mime: 'image/png', kind: 'image', bytes: png.length,
-    make: memo(async () => blobOf(png, 'image/png')),
-  };
+  return out;
+}
+
+/** 只要最高层的便捷入口 */
+export async function texToPrimaryOutput(tex: TexFile, sourceName: string): Promise<TexOutcome> {
+  const [first] = await texOutputs(tex, sourceName, [0]);
+  if (!first) throw new Error('TEX 无 mipmap');
+  return first;
 }
 
 /**
@@ -179,11 +205,14 @@ export async function buildItems(
   pkg: PkgFile,
   options: DecodeOptions,
   ports: DecodePorts = {},
-): Promise<{ items: ExtractItem[]; meta?: WallpaperMeta }> {
+): Promise<{ items: ExtractItem[]; meta?: WallpaperMeta; maxMip: number }> {
   const items: ExtractItem[] = [];
   let meta: WallpaperMeta | undefined;
   let nextId = 1;
   const takeId = () => nextId++;
+  const mipLevels = options.mipLevels?.length ? options.mipLevels : [0];
+  /** 整包里最深的 mip 链长度，UI 据此决定「纹理层级」能给几个选项 */
+  let maxMip = 0;
 
   for (const entry of pkg.entries) {
     const ext = extOf(entry.name);
@@ -220,6 +249,7 @@ export async function buildItems(
       items.push(rawOutput(`TEX 解析失败，已按原样导出: ${(e as Error).message}`));
       continue;
     }
+    for (const mips of tex.images) maxMip = Math.max(maxMip, mips.length);
     try {
       if (isAnimatedTex(tex)) {
         if (options.legacyFrames) {
@@ -245,14 +275,16 @@ export async function buildItems(
           continue;
         }
       }
-      const main = await texToPrimaryOutput(tex, entry.name);
-      items.push({
-        id, name: main.name, sourcePath: entry.name, kind: main.kind,
-        mime: main.mime, bytes: main.bytes, tex, toBlob: main.make,
+      const outs = await texOutputs(tex, entry.name, mipLevels, ports);
+      outs.forEach((o, i) => {
+        items.push({
+          id: i === 0 ? id : takeId(), name: o.name, sourcePath: entry.name, kind: o.kind,
+          mime: o.mime, bytes: o.bytes, tex, toBlob: o.make,
+        });
       });
     } catch (e) {
       items.push(rawOutput(`TEX 解码失败，已按原样导出: ${(e as Error).message}`));
     }
   }
-  return { items, meta };
+  return { items, meta, maxMip };
 }

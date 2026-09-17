@@ -18,7 +18,7 @@ interface Summary {
   mime: string; bytes: number; estimated?: boolean; poster?: boolean; warning?: string;
 }
 type OutMsg =
-  | { type: 'parsed'; magic: string; items: Summary[]; meta?: WallpaperMeta }
+  | { type: 'parsed'; magic: string; items: Summary[]; meta?: WallpaperMeta; maxMip: number }
   | { type: 'error'; message: string }
   | { type: 'blob'; id: number; variant: BlobVariant; blob: Blob; bytes: number; patch?: ItemPatch };
 
@@ -37,7 +37,7 @@ function summarize(it: ExtractItem): Summary {
 async function doParse(options: DecodeOptions): Promise<void> {
   const built = await buildItems(pkg!, options, rasterPorts);
   items = built.items;
-  post({ type: 'parsed', magic: pkg!.magic, items: items.map(summarize), meta: built.meta });
+  post({ type: 'parsed', magic: pkg!.magic, items: items.map(summarize), meta: built.meta, maxMip: built.maxMip });
 }
 
 /**
