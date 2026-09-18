@@ -22,7 +22,7 @@
 ## 开发与验证
 
 ```bash
-cd we-pkg-web
+cd WallpaperEngine-PKG-Extractor-Web
 npm install
 npm run dev
 ```

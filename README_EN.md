@@ -22,7 +22,7 @@ Parses Wallpaper Engine `.pkg` (desktop) / `.mpkg` (Android) wallpaper packages,
 ## Development & Verification
 
 ```bash
-cd we-pkg-web
+cd WallpaperEngine-PKG-Extractor-Web
 npm install
 npm run dev
 ```
