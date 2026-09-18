@@ -35,16 +35,55 @@ interface Box {
 export interface Palette {
   /** 256×3 的 RGB 表，索引 0 为透明占位 */
   readonly rgb: Uint8Array;
-  /** 32768 桶 → 调色板索引，量化时 O(1) 查表 */
-  readonly bucketIndex: Uint8Array;
+  /** 实际用到的表项数（含 0 号） */
   readonly used: number;
+  /** 精确色调色板：packed RGB → 索引（色数装得下时才有） */
+  readonly exact?: Map<number, number>;
+  /** 分桶调色板：32768 桶 → 调色板索引，量化时 O(1) 查表（色数很多时才有） */
+  readonly bucketIndex?: Uint8Array;
+}
+
+/** 装得下的精确色上限：0 号留给透明 */
+const MAX_EXACT = PALETTE_ENTRIES - 1;
+
+/** 不透明像素的精确颜色集合；超过 MAX_EXACT 种就返回 null（装不下，改走分桶） */
+function collectExact(rgba: Uint8Array): Set<number> | null {
+  const set = new Set<number>();
+  for (let i = 0; i < rgba.length; i += 4) {
+    if (rgba[i + 3] < ALPHA_CUTOFF) continue;
+    const key = (rgba[i] << 16) | (rgba[i + 1] << 8) | rgba[i + 2];
+    if (!set.has(key)) {
+      if (set.size >= MAX_EXACT) return null;
+      set.add(key);
+    }
+  }
+  return set;
+}
+
+function exactPalette(colors: Set<number>): Palette {
+  const rgb = new Uint8Array(PALETTE_ENTRIES * 3);
+  const exact = new Map<number, number>();
+  // 排序只为确定性：同一输入必须产出同一份字节流
+  const keys = [...colors].sort((a, b) => a - b);
+  keys.forEach((key, i) => {
+    const at = (i + 1) * 3;
+    rgb[at] = (key >> 16) & 0xff;
+    rgb[at + 1] = (key >> 8) & 0xff;
+    rgb[at + 2] = key & 0xff;
+    exact.set(key, i + 1);
+  });
+  return { rgb, used: keys.length + 1, exact };
 }
 
 /**
- * 中位切分：只在占用桶上做，按像素数加权把最宽的盒子对半切，最多 255 色（0 号留给透明）。
+ * 一帧的调色板：色数装得下就用**精确色**（GIF 这一帧无损），装不下才退到分桶 + 中位切分。
+ * 中位切分只在占用桶上做，按像素数加权把最宽的盒子对半切，最多 255 色（0 号留给透明）；
  * 桶的代表色用桶内真实像素均值，而不是桶中心——否则纯黑会变成 4 这类系统偏差。
  */
 export function buildPalette(rgba: Uint8Array): Palette {
+  const colors = collectExact(rgba);
+  if (colors) return exactPalette(colors);
+
   const counts = new Int32Array(BUCKETS);
   const sumR = new Float64Array(BUCKETS);
   const sumG = new Float64Array(BUCKETS);
@@ -163,10 +202,25 @@ export function quantize(rgba: Uint8Array, width: number, height: number, palett
   indices: Uint8Array; hasTransparent: boolean;
 } {
   const indices = new Uint8Array(width * height);
+  let hasTransparent = false;
+
+  // 精确调色板：每个不透明像素的颜色都在表里，直查即可，这一帧无损
+  if (palette.exact) {
+    const { exact } = palette;
+    for (let i = 0, p = 0; i < indices.length; i++, p += 4) {
+      if (rgba[p + 3] < ALPHA_CUTOFF) {
+        indices[i] = TRANSPARENT_INDEX;
+        hasTransparent = true;
+        continue;
+      }
+      indices[i] = exact.get((rgba[p] << 16) | (rgba[p + 1] << 8) | rgba[p + 2]) ?? TRANSPARENT_INDEX;
+    }
+    return { indices, hasTransparent };
+  }
+
   // 色数很少时抖动只会引入噪声：超过 16 色才真正施加 Bayer 位移
   const spread = palette.used > 16 ? LIMITS.gifDitherSpread : 0;
-  const { bucketIndex } = palette;
-  let hasTransparent = false;
+  const bucketIndex = palette.bucketIndex!;
   let i = 0;
   for (let y = 0; y < height; y++) {
     const row = BAYER[y & 3];
