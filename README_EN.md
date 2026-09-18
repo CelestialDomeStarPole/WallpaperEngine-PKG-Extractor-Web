@@ -14,7 +14,7 @@ Parses Wallpaper Engine `.pkg` (desktop) / `.mpkg` (Android) wallpaper packages,
 - Entry list + image/video thumbnail previews + full-size modal viewer
 - Automatic `.tex → jpg/png/mp4` conversion (can be disabled; when disabled, `.tex` files are exported as-is); video textures (a TEX wrapping an mp4) are passed through zero-copy as `.mp4`
 - Selectable texture mip levels: top resolution only by default, or tick lower levels to export them too (suffixed `.mipN`)
-- Animated textures (`.tex` with a frame table) are re-encoded into a single **APNG** (lossless, keeps alpha) or **GIF** (256 colours, small), or both
+- Animated textures (`.tex` with a frame table) are re-encoded into a single **APNG** (lossless, keeps alpha) or **GIF** (256 colours, small), or both; when a frame has ≤255 distinct colours the GIF uses an exact palette and is **pixel-for-pixel lossless** (true for most flat/vector-style wallpapers)
 - Multi-select cards: bulk download the selection, or ZIP it
 - Single file download / streaming ZIP export preserving directory structure
 - Filtering (images/videos/JSON), `project.json` metadata card
@@ -84,3 +84,4 @@ npm run dev
 - PKGV (desktop `.pkg`) / PKGM (Android `.mpkg`) stores entry offsets as int32, so a **package larger than 2GB cannot exist** in this format; such files are rejected outright
 - A single re-encoded animation larger than 200MB falls back to the first frame as PNG, with a dialog explaining why
 - Animated textures always export the top mip level (re-encoding works on the whole sprite sheet); the level selection does not affect them
+- GIF is limited to 256 colours per frame: beyond that we use bucketing + median cut + ordered dithering, which introduces a slight quantisation error (pick APNG for full fidelity)
