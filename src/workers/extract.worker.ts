@@ -63,7 +63,7 @@ async function handle(msg: InMsg): Promise<void> {
       throw new Error(
         magic === 'PKG '
           ? '检测到 Workshop 加密格式（PKG v1/v2），当前版本暂不支持，第二期将提供。'
-          : '无法识别的文件格式：不是明文 PKGV / PKGM 容器。',
+          : '无法识别的文件格式：不是明文 PKGV / PKGM 容器，也不是 TEX 贴图。',
       );
     }
     pkg = await adapter.parse(source);

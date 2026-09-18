@@ -384,11 +384,11 @@ async function isPkgFile(file: File): Promise<boolean> {
 
 async function handleFile(file: File) {
   if (!(await isPkgFile(file))) {
-    setStatus('仅支持 .pkg / .mpkg 文件', 'err');
+    setStatus('仅支持 .pkg / .mpkg / .tex 文件', 'err');
     return;
   }
   if (file.size > LIMITS.pkgFormatCeiling) {
-    const why = `${fmtSize(file.size)}：PKG 目录表的偏移字段是 int32，这个格式本身存不下超过 ${fmtSize(LIMITS.pkgFormatCeiling)} 的包`;
+    const why = `${fmtSize(file.size)}：PKGV 目录表与 TEX 的 mip 长度字段都是 int32，存不下超过 ${fmtSize(LIMITS.pkgFormatCeiling)} 的文件`;
     setStatus(why, 'err');
     showNotice('这个包大到格式层面就无法解析', [why]);
     return;
