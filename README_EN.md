@@ -6,11 +6,11 @@ English | [简体中文](README.md)
 
 </div>
 
-Parses Wallpaper Engine `.pkg` (desktop) / `.mpkg` (Android) wallpaper packages **entirely in the user's browser**, extracting jpg / png / mp4 / webm and any other resource inside the package; supports `.tex` decoding and conversion. Everything runs locally and is independent of the web server, so it can be deployed as a static site. [Live Demo](https://pkg.cdsp.us.ci)
+Parses Wallpaper Engine `.pkg` (desktop) / `.mpkg` (Android) wallpaper packages, as well as standalone `.tex` texture files, **entirely in the user's browser**, extracting jpg / png / mp4 / webm and any other resource inside the package; supports `.tex` decoding and conversion. Everything runs locally and is independent of the web server, so it can be deployed as a static site. [Live Demo](https://pkg.cdsp.us.ci)
 
 ## Features
 
-- Drag & drop / file picker / Ctrl+V paste for `.pkg` / `.mpkg` files, up to roughly 2GB (parsing reads only the table of contents; the archive never sits in memory)
+- Drag & drop / file picker / Ctrl+V paste for `.pkg` / `.mpkg` / `.tex` files, up to roughly 2GB (parsing reads only the table of contents; the archive never sits in memory)
 - Entry list + image/video thumbnail previews + full-size modal viewer
 - Automatic `.tex → jpg/png/mp4` conversion (can be disabled; when disabled, `.tex` files are exported as-is); video textures (a TEX wrapping an mp4) are passed through zero-copy as `.mp4`
 - Selectable texture mip levels: top resolution only by default, or tick lower levels to export them too (suffixed `.mipN`)
