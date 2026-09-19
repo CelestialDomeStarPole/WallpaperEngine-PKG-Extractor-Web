@@ -9,11 +9,22 @@ import type { BlobVariant, DecodeOptions, DecodePorts, ExtractItem, ItemKind, Pk
 const EXT_MIME: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', apng: 'image/apng',
   webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon',
-  mp4: 'video/mp4', webm: 'video/webm', mp3: 'audio/mpeg', ogg: 'audio/ogg',
+  mp4: 'video/mp4', webm: 'video/webm',
+  mp3: 'audio/mpeg', ogg: 'audio/ogg', oga: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac',
+  m4a: 'audio/mp4', aac: 'audio/aac', opus: 'audio/opus',
   json: 'application/json', txt: 'text/plain',
 };
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'apng']);
 const VIDEO_EXTS = new Set(['mp4', 'webm']);
+const AUDIO_EXTS = new Set(['mp3', 'ogg', 'oga', 'wav', 'flac', 'm4a', 'aac', 'opus']);
+
+/** 包内按扩展名归类；.tex 之外的条目都只做直通，不解析内容 */
+function kindOf(ext: string): ItemKind {
+  if (IMAGE_EXTS.has(ext)) return 'image';
+  if (VIDEO_EXTS.has(ext)) return 'video';
+  if (AUDIO_EXTS.has(ext)) return 'audio';
+  return ext === 'json' ? 'json' : 'binary';
+}
 
 /** 逐帧 PNG 兜底路径最多产出多少帧 */
 const LEGACY_FRAME_CAP = 60;
@@ -235,7 +246,7 @@ export async function buildItems(
 
     if (ext !== 'tex') {
       const mime = EXT_MIME[ext] ?? 'application/octet-stream';
-      const kind: ItemKind = IMAGE_EXTS.has(ext) ? 'image' : VIDEO_EXTS.has(ext) ? 'video' : ext === 'json' ? 'json' : 'binary';
+      const kind = kindOf(ext);
       if (ext === 'json' && /(^|\/)project\.json$/.test(entry.name)) {
         try {
           const bytes = await source.read(0, Math.min(entry.length, LIMITS.metaJsonMaxRead), 'project.json');

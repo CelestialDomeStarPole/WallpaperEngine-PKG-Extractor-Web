@@ -70,7 +70,7 @@ export interface TexFile {
   frames: TexFrame[];
 }
 
-export type ItemKind = 'image' | 'video' | 'json' | 'binary';
+export type ItemKind = 'image' | 'video' | 'audio' | 'json' | 'binary';
 
 /** poster = 动画条目的第 0 帧单图，只为缩略图存在，避免为一格小图编完整动画 */
 export type BlobVariant = 'full' | 'poster';

@@ -26,6 +26,7 @@ const PAGE_SIZE = 15;
 const GROUP_ORDER: { kind: ItemKind; label: string }[] = [
   { kind: 'image', label: '图片' },
   { kind: 'video', label: '视频' },
+  { kind: 'audio', label: '音乐' },
   { kind: 'json', label: 'JSON' },
   { kind: 'binary', label: '其他' },
 ];
@@ -443,7 +444,7 @@ function renderMeta(meta: WallpaperMeta | undefined, items: ItemSummary[]) {
   const total = items.reduce((a, i) => a + i.bytes, 0);
   metaCard.hidden = false;
   if (!meta) {
-    metaCard.innerHTML = `<div class="row">条目 ${items.length} · 图片 ${counts.image ?? 0} · 视频 ${counts.video ?? 0} · 其他 ${counts.binary ?? 0} · 合计 ${fmtSize(total)}</div>`;
+    metaCard.innerHTML = `<div class="row">条目 ${items.length} · 图片 ${counts.image ?? 0} · 视频 ${counts.video ?? 0} · 音乐 ${counts.audio ?? 0} · 其他 ${counts.binary ?? 0} · 合计 ${fmtSize(total)}</div>`;
   } else {
     metaCard.innerHTML = `
       <h2>${esc(meta.title)}</h2>
@@ -514,7 +515,7 @@ function renderFolders() {
 }
 
 function groupIcon(kind: ItemKind): string {
-  return kind === 'video' ? '🎬' : kind === 'image' ? '🖼' : kind === 'json' ? '{ }' : '📄';
+  return kind === 'video' ? '🎬' : kind === 'image' ? '🖼' : kind === 'audio' ? '🎵' : kind === 'json' ? '{ }' : '📄';
 }
 
 function renderFolderContents(kind: ItemKind, page: number) {
@@ -716,6 +717,12 @@ async function openItem(id: number) {
       video.controls = true;
       video.autoplay = true;
       modalContent.append(video);
+    } else if (item.kind === 'audio') {
+      const audio = document.createElement('audio');
+      audio.src = url;
+      audio.controls = true;
+      audio.autoplay = true;
+      modalContent.append(audio);
     } else {
       const blob = await requestBlob(id);
       const text = await blob.text();
