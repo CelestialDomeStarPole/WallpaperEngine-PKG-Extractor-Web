@@ -80,7 +80,7 @@ npm run dev
 ## Known Limitations
 
 - Workshop-encrypted packages (`PKG ` v1/v2) are not supported yet; planned for phase two
-- No audio/video formats beyond `.webm` / `.mp4`
+- No video formats beyond `.webm` / `.mp4`
 - PKGV (desktop `.pkg`) / PKGM (Android `.mpkg`) stores entry offsets as int32, so a **package larger than 2GB cannot exist** in this format; such files are rejected outright
 - A single re-encoded animation larger than 200MB falls back to the first frame as PNG, with a dialog explaining why
 - Animated textures always export the top mip level (re-encoding works on the whole sprite sheet); the level selection does not affect them
