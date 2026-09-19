@@ -136,8 +136,7 @@ function readRadius(el: HTMLElement): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function overlapRatio(el: HTMLElement): number {
-  const r = el.getBoundingClientRect();
+function overlapRatio(r: DOMRect): number {
   if (r.width <= 0 || r.height <= 0) return 0;
   const iw = Math.min(r.right, window.innerWidth) - Math.max(r.left, 0);
   const ih = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
@@ -149,12 +148,22 @@ export function createGlassController(defs: SVGDefsElement): GlassController {
   const supported = detectRefract(defs);
   const wanted = new Set<HTMLElement>();
   const filterIds = new Map<string, string>();
+  /** 元素当前挂着的尺寸键：滤镜区域是固定 px，尺寸一变就必须换，否则会露出没被滤镜覆盖的一条 */
+  const appliedKey = new Map<HTMLElement, string>();
   const order: string[] = [];
   let enabled = supported;
   let resizeTimer: number | undefined;
 
-  const filterFor = (el: HTMLElement): string | null => {
-    const rect = el.getBoundingClientRect();
+  /** 淘汰旧滤镜：连同还指着它的元素一起忘掉，下一趟 reconcile 会重新分配 */
+  const evict = (key: string) => {
+    const id = filterIds.get(key);
+    if (!id) return;
+    filterIds.delete(key);
+    defs.querySelector(`#${id}`)?.remove();
+    for (const [el, k] of appliedKey) if (k === key) appliedKey.delete(el);
+  };
+
+  const filterFor = (el: HTMLElement, rect: DOMRect): { id: string; key: string } | null => {
     if (rect.width < 24 || rect.height < 24) return null;
     const radius = readRadius(el);
     const key = `${quantize(rect.width)}x${quantize(rect.height)}x${Math.round(radius)}`;
@@ -165,23 +174,28 @@ export function createGlassController(defs: SVGDefsElement): GlassController {
       order.push(key);
       while (order.length > LRU_MAX) {
         const dead = order.shift();
-        if (!dead) break;
-        const deadId = filterIds.get(dead);
-        filterIds.delete(dead);
-        defs.querySelector(`#${deadId}`)?.remove();
+        if (dead) evict(dead);
       }
     }
-    return id;
+    return { id, key };
   };
 
-  const apply = (el: HTMLElement, on: boolean) => {
+  const apply = (el: HTMLElement, on: boolean, rect?: DOMRect) => {
     if (!on) {
       el.style.removeProperty('--lg-refract');
+      appliedKey.delete(el);
       return;
     }
-    if (el.style.getPropertyValue('--lg-refract')) return;
-    const id = filterFor(el);
-    if (id) el.style.setProperty('--lg-refract', `url(#${id})`);
+    const hit = filterFor(el, rect ?? el.getBoundingClientRect());
+    if (!hit) {
+      // 收成 0 尺寸或太小：撤掉引用，别让它继续指着一个不匹配的滤镜
+      el.style.removeProperty('--lg-refract');
+      appliedKey.delete(el);
+      return;
+    }
+    if (appliedKey.get(el) === hit.key) return;
+    el.style.setProperty('--lg-refract', `url(#${hit.id})`);
+    appliedKey.set(el, hit.key);
   };
 
   const reconcile = () => {
@@ -192,17 +206,25 @@ export function createGlassController(defs: SVGDefsElement): GlassController {
     }
     // 就地按视口求交集，而不是依赖 IntersectionObserver 的回调数据：
     // 后者的初始回调要等帧调度，页面不可见时整批不来，折射就会永久缺席
+    const rects = new Map<HTMLElement, DOMRect>();
     const ranked = [...wanted]
-      .map((el) => [el, overlapRatio(el)] as const)
-      .filter(([, ratio]) => ratio > 0.02)
-      .sort((a, b) => b[1] - a[1])
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        rects.set(el, r);
+        return { el, ratio: overlapRatio(r) };
+      })
+      .filter((x) => x.ratio > 0.02)
+      .sort((a, b) => b.ratio - a.ratio)
       .slice(0, MAX_REFRACT_LAYERS);
-    const allowed = new Set(ranked.map(([el]) => el));
-    for (const el of wanted) apply(el, allowed.has(el));
+    const allowed = new Set(ranked.map((x) => x.el));
+    for (const el of wanted) apply(el, allowed.has(el), rects.get(el));
   };
 
   const io = new IntersectionObserver(() => reconcile(), { threshold: [0, 0.03, 0.25, 0.6] });
   window.addEventListener('scroll', () => requestAnimationFrame(reconcile), { passive: true });
+  // 内容变化（纹理层级那一行填进来、缩略图撑高卡片）都会改尺寸，
+  // 而 backdrop-filter 的区域不会跟着长大：盯着尺寸，一变就换滤镜
+  const ro = new ResizeObserver(() => reconcile());
 
   const collect = (root: ParentNode, on: boolean) => {
     const nodes: HTMLElement[] = root instanceof HTMLElement && root.matches('.glass') ? [root] : [];
@@ -212,9 +234,11 @@ export function createGlassController(defs: SVGDefsElement): GlassController {
         if (wanted.has(el)) continue;
         wanted.add(el);
         io.observe(el);
+        ro.observe(el);
       } else {
         wanted.delete(el);
         io.unobserve(el);
+        ro.unobserve(el);
         apply(el, false);
       }
     }
@@ -232,7 +256,10 @@ export function createGlassController(defs: SVGDefsElement): GlassController {
     setEnabled: (on) => { enabled = on && supported; reconcile(); },
     refresh: () => {
       if (!enabled) return;
-      for (const el of wanted) el.style.removeProperty('--lg-refract');
+      for (const el of wanted) {
+        el.style.removeProperty('--lg-refract');
+        appliedKey.delete(el);
+      }
       reconcile();
       requestAnimationFrame(reconcile);
     },

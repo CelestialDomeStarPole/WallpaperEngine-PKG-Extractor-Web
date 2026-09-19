@@ -1,6 +1,7 @@
 import './style.css';
 import type { BlobVariant, DecodeOptions, ItemKind, WallpaperMeta } from '../core/types';
 import { detectAdapter } from '../core/adapter';
+import { buildDirTree, dirAt, dirStats, parentDir, type DirNode } from '../core/dirtree';
 import { LIMITS } from '../core/limits';
 import { ZipWriter, entryName, uniqueKey } from '../core/zipstream';
 import { createGlassController } from './glass';
@@ -20,7 +21,26 @@ interface ItemPatch { name: string; mime: string; kind: ItemKind; notice: string
 
 interface Group { kind: ItemKind; label: string; items: ItemSummary[]; bytes: number }
 
-type View = { name: 'folders' } | { name: 'folder'; kind: ItemKind; page: number };
+/** 展示方案：按文件类型归组，或按包内目录结构 */
+type BrowseMode = 'kind' | 'dir';
+type View =
+  | { name: 'root' } // 类型模式的根：各类型的文件夹入口
+  | { name: 'kind'; kind: ItemKind; page: number } // 某个类型文件夹内
+  | { name: 'dir'; path: string; page: number }; // 目录模式：某个目录内（'' = 根）
+
+const BROWSE_KEY = 'we.browse.v1';
+
+function loadBrowse(): BrowseMode {
+  try {
+    return localStorage.getItem(BROWSE_KEY) === 'dir' ? 'dir' : 'kind';
+  } catch {
+    return 'kind'; // 隐私模式下存不动，用默认值
+  }
+}
+
+let browse: BrowseMode = loadBrowse();
+/** 两种模式的根视图形态不同：类型模式是文件夹入口列表，目录模式就是根目录本身 */
+const rootView = (): View => (browse === 'dir' ? { name: 'dir', path: '', page: 0 } : { name: 'root' });
 
 const PAGE_SIZE = 15;
 const GROUP_ORDER: { kind: ItemKind; label: string }[] = [
@@ -50,6 +70,7 @@ const animatedField = $<HTMLElement>('#field-animated');
 const mipField = $<HTMLElement>('#field-mips');
 const mipList = $<HTMLElement>('#mip-list');
 const zipBtn = $<HTMLButtonElement>('#btn-zip');
+const browseSelect = $<HTMLSelectElement>('#opt-browse');
 const selbar = $<HTMLElement>('#selbar');
 const selSummary = $<HTMLElement>('#sel-summary');
 const selHint = $<HTMLElement>('#sel-hint');
@@ -69,7 +90,7 @@ const dock = initDock(document.documentElement, glass);
 const worker = new Worker(new URL('../workers/extract.worker.ts', import.meta.url), { type: 'module' });
 
 let currentItems: ItemSummary[] = [];
-let view: View = { name: 'folders' };
+let view: View = rootView();
 let renderToken = 0;
 
 /** 缓存键：同一条目的完整输出与 poster 单图分开存 */
@@ -155,7 +176,7 @@ worker.onmessage = (ev: MessageEvent<OutMsg>) => {
     parseEpoch += 1;
     running = false;
     runLabel = '';
-    view = { name: 'folders' };
+    view = rootView();
     setStatus(`解析成功：${msg.items.length} 个条目（${msg.magic}）`, 'ok');
     optionsBar.hidden = false;
     result.hidden = false;
@@ -278,11 +299,21 @@ function flushNotices() {
 // —— 多选 ——
 const selectedItems = () => currentItems.filter((i) => selected.has(i.id));
 
-/** 「全选本类」的目标：文件夹视图内＝该类全部条目（跨页），上层＝全部 */
-function scopeItemsToSelect(): ItemSummary[] {
-  if (view.name !== 'folder') return currentItems;
-  const kind = view.kind;
-  return currentItems.filter((i) => i.kind === kind);
+/**
+ * 「全选」的目标＝当前视图列出的文件：
+ * 类型模式＝该类型全部条目（跨页）；目录模式＝本目录直接列出的文件（不递归，跟看得见的范围一致）。
+ */
+function selectScope(): { items: ItemSummary[]; label: string } {
+  if (view.name === 'kind') {
+    const kind = view.kind;
+    const items = currentItems.filter((i) => i.kind === kind);
+    return { items, label: `全选本类（${items.length}）` };
+  }
+  if (view.name === 'dir') {
+    const items = dirAt(dirTree(), view.path)?.items ?? [];
+    return { items, label: `全选本目录（${items.length}）` };
+  }
+  return { items: currentItems, label: `全选全部（${currentItems.length}）` };
 }
 
 /** 只改可见卡片的 class 与勾选框，不重建 DOM：重建会重新拉一遍缩略图并触发折射重算 */
@@ -325,9 +356,9 @@ function renderSelbar() {
   selHint.hidden = n <= BATCH_HINT;
   selHint.textContent = `已选 ${n} 个：逐个下载需要浏览器允许「下载多个文件」，且会占用 ${n} 次下载队列；建议改用打包下载，只需一次保存。`;
 
-  const scope = scopeItemsToSelect();
-  const pendingCount = scope.filter((i) => !selected.has(i.id)).length;
-  selAll.textContent = `${view.name === 'folder' ? '全选本类' : '全选全部'}（${scope.length}）`;
+  const scope = selectScope();
+  const pendingCount = scope.items.filter((i) => !selected.has(i.id)).length;
+  selAll.textContent = scope.label;
   selAll.disabled = running || !pendingCount;
   selClear.disabled = running || !n;
   selZip.disabled = running || !n;
@@ -475,16 +506,31 @@ function groups(): Group[] {
   return out;
 }
 
+// —— 目录树（按 sourcePath 归位，与展示方式无关，只算一次） ——
+let treeCache: { items: ItemSummary[]; root: DirNode<ItemSummary> } | null = null;
+
+function dirTree(): DirNode<ItemSummary> {
+  if (!treeCache || treeCache.items !== currentItems) {
+    treeCache = { items: currentItems, root: buildDirTree(currentItems) };
+  }
+  return treeCache.root;
+}
+
+/** 同级排序：文件夹与文件都按名字，数字段按数值比较（mip2 排在 mip10 前） */
+const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+const leafName = (item: ItemSummary) => item.name.split('/').pop() || item.name;
+
 // —— 视图渲染 ——
 function render() {
   glass.release(grid);
-  if (view.name === 'folders') renderFolders();
-  else renderFolderContents(view.kind, view.page);
+  if (view.name === 'kind') renderKindContents(view.kind, view.page);
+  else if (view.name === 'dir') renderDirContents(view.path, view.page);
+  else renderKindRoot();
   glass.observe(grid);
   renderSelbar();
 }
 
-function renderFolders() {
+function renderKindRoot() {
   crumbs.hidden = true;
   pager.hidden = true;
   grid.className = 'grid grid--folders';
@@ -495,21 +541,11 @@ function renderFolders() {
     return;
   }
   for (const g of list) {
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'folder glass';
-    card.dataset.group = g.kind;
     const first = g.items.find((i) => i.kind === 'image' || i.kind === 'video');
-    card.innerHTML = `
-      <span class="folder-thumb"${first ? ` data-slot="${first.id}"` : ''}>${first ? '' : groupIcon(g.kind)}</span>
-      <span class="folder-body">
-        <span>
-          <span class="folder-name">${esc(g.label)}</span>
-          <span class="folder-meta">${g.items.length} 个文件 · ${fmtSize(g.bytes)}</span>
-        </span>
-        <span class="chev" aria-hidden="true">›</span>
-      </span>`;
-    grid.append(card);
+    grid.append(folderCard(groupIcon(g.kind), g.label, `${g.items.length} 个文件 · ${fmtSize(g.bytes)}`, {
+      group: g.kind,
+      slot: first?.id,
+    }));
   }
   void loadThumbs();
 }
@@ -518,7 +554,50 @@ function groupIcon(kind: ItemKind): string {
   return kind === 'video' ? '🎬' : kind === 'image' ? '🖼' : kind === 'audio' ? '🎵' : kind === 'json' ? '{ }' : '📄';
 }
 
-function renderFolderContents(kind: ItemKind, page: number) {
+/** 类型模式与目录模式共用的文件夹卡片：靠 data-group / data-dir 区分点开后的去向 */
+function folderCard(icon: string, name: string, meta: string, target: { group: ItemKind; slot?: number } | { dir: string; slot?: number }): HTMLElement {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'folder glass';
+  if ('group' in target) card.dataset.group = target.group;
+  else card.dataset.dir = target.dir;
+  card.innerHTML = `
+    <span class="folder-thumb"${target.slot !== undefined ? ` data-slot="${target.slot}"` : ''}>${target.slot !== undefined ? '' : icon}</span>
+    <span class="folder-body">
+      <span>
+        <span class="folder-name">${esc(name)}</span>
+        <span class="folder-meta">${meta}</span>
+      </span>
+      <span class="chev" aria-hidden="true">›</span>
+    </span>`;
+  return card;
+}
+
+/** 文件卡片：两种模式完全一致，只是目录模式把文件名缩到叶子名 */
+function fileCard(item: ItemSummary, showFullPath: boolean): HTMLElement {
+  const on = selected.has(item.id);
+  const media = item.kind === 'image' || item.kind === 'video';
+  const card = document.createElement('div');
+  card.className = `card glass${on ? ' selected' : ''}`;
+  card.dataset.id = String(item.id);
+  card.innerHTML = `
+    <input class="card-check" type="checkbox" ${on ? 'checked' : ''} aria-label="选中 ${esc(item.name)}" />
+    <div class="thumb" data-slot="${item.id}">${media ? '' : `<span style="font-size:16px">${groupIcon(item.kind)}</span>`}</div>
+    <div class="info">
+      <div class="name" data-name="${item.id}" title="${esc(item.sourcePath)}">${esc(showFullPath ? item.name : leafName(item))}</div>
+      <div class="meta"><span>${esc(item.kind)}</span><span class="size${item.estimated ? ' est' : ''}" data-size="${item.id}"${
+        item.estimated ? ' title="动图为编码前估算值，导出后会回填成实际大小"' : ''
+      }>${item.estimated ? '~' : ''}${fmtSize(item.bytes)}${item.estimated ? ' 估算' : ''}</span></div>
+      ${item.warning ? `<div class="warn">${esc(item.warning)}</div>` : ''}
+      <div class="actions">
+        <button class="btn small" data-download="${item.id}">下载</button>
+        <button class="btn small" data-open="${item.id}">查看</button>
+      </div>
+    </div>`;
+  return card;
+}
+
+function renderKindContents(kind: ItemKind, page: number) {
   const group = groups().find((g) => g.kind === kind);
   grid.className = 'grid';
   if (!group) {
@@ -529,42 +608,91 @@ function renderFolderContents(kind: ItemKind, page: number) {
   }
   const pageCount = Math.max(1, Math.ceil(group.items.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
-  view = { name: 'folder', kind, page: safePage };
+  view = { name: 'kind', kind, page: safePage };
 
-  renderCrumbs(group);
+  renderKindCrumbs(group);
   grid.innerHTML = '';
   for (const item of group.items.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)) {
-    const on = selected.has(item.id);
-    const media = item.kind === 'image' || item.kind === 'video';
-    const card = document.createElement('div');
-    card.className = `card glass${on ? ' selected' : ''}`;
-    card.dataset.id = String(item.id);
-    card.innerHTML = `
-      <input class="card-check" type="checkbox" ${on ? 'checked' : ''} aria-label="选中 ${esc(item.name)}" />
-      <div class="thumb" data-slot="${item.id}">${media ? '' : `<span style="font-size:16px">${groupIcon(item.kind)}</span>`}</div>
-      <div class="info">
-        <div class="name" data-name="${item.id}" title="${esc(item.sourcePath)}">${esc(item.name)}</div>
-        <div class="meta"><span>${esc(item.kind)}</span><span class="size${item.estimated ? ' est' : ''}" data-size="${item.id}"${
-          item.estimated ? ' title="动图为编码前估算值，导出后会回填成实际大小"' : ''
-        }>${item.estimated ? '~' : ''}${fmtSize(item.bytes)}${item.estimated ? ' 估算' : ''}</span></div>
-        ${item.warning ? `<div class="warn">${esc(item.warning)}</div>` : ''}
-        <div class="actions">
-          <button class="btn small" data-download="${item.id}">下载</button>
-          <button class="btn small" data-open="${item.id}">查看</button>
-        </div>
-      </div>`;
-    grid.append(card);
+    grid.append(fileCard(item, true));
   }
   renderPager(safePage, pageCount);
   void loadThumbs();
 }
 
-function renderCrumbs(group: Group) {
+/** 目录模式：子目录不参与分页（它们是导航入口），只有文件分页 */
+function renderDirContents(path: string, page: number) {
+  const node = dirAt(dirTree(), path);
+  grid.className = 'grid';
+  if (!node) {
+    grid.innerHTML = '<p class="empty">该文件夹为空。</p>';
+    crumbs.hidden = true;
+    pager.hidden = true;
+    return;
+  }
+  const dirs = [...node.dirs.entries()].sort((a, b) => byName(a[0], b[0]));
+  const files = [...node.items].sort((a, b) => byName(leafName(a), leafName(b)));
+  if (!dirs.length && !files.length) {
+    grid.innerHTML = '<p class="empty">这个包里没有可导出的条目。</p>';
+    crumbs.hidden = true;
+    pager.hidden = true;
+    return;
+  }
+  const pageCount = Math.max(1, Math.ceil(files.length / PAGE_SIZE));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  view = { name: 'dir', path, page: safePage };
+
+  renderDirCrumbs(node, dirs.length + files.length);
+  grid.innerHTML = '';
+  for (const [name, child] of dirs) {
+    const stats = dirStats(child, (i) => i.bytes);
+    const first = firstMedia(child);
+    grid.append(folderCard('📁', name, `${stats.count} 个文件 · ${fmtSize(stats.bytes)}`, { dir: child.path, slot: first?.id }));
+  }
+  for (const item of files.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)) {
+    grid.append(fileCard(item, false));
+  }
+  renderPager(safePage, pageCount);
+  void loadThumbs();
+}
+
+/** 文件夹卡片的缩略图取子树里第一张图/视频，没有就显示图标 */
+function firstMedia(node: DirNode<ItemSummary>): ItemSummary | undefined {
+  const hit = node.items.find((i) => i.kind === 'image' || i.kind === 'video');
+  if (hit) return hit;
+  for (const child of node.dirs.values()) {
+    const found = firstMedia(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function renderKindCrumbs(group: Group) {
   crumbs.hidden = false;
   crumbs.innerHTML = `
     <button type="button" data-crumb="root">全部文件夹</button>
     <span class="sep" aria-hidden="true">›</span>
     <button type="button" data-crumb="${group.kind}" aria-current="page">${esc(group.label)}（${group.items.length}）</button>`;
+  glass.observe(crumbs);
+}
+
+/** 目录模式的面包屑：计数是「本层可见的子项数」（含子文件夹），与文件数不是一回事，所以带单位 */
+function renderDirCrumbs(node: DirNode<ItemSummary>, count: number) {
+  const segs = node.path ? node.path.split('/') : [];
+  crumbs.hidden = false;
+  const tail = segs
+    .map((seg, i) => {
+      const segPath = segs.slice(0, i + 1).join('/');
+      const last = i === segs.length - 1;
+      return `<span class="sep" aria-hidden="true">›</span>${
+        last
+          ? `<button type="button" data-dir="${esc(segPath)}" aria-current="page">${esc(seg)}（${count} 项）</button>`
+          : `<button type="button" data-dir="${esc(segPath)}">${esc(seg)}</button>`
+      }`;
+    })
+    .join('');
+  crumbs.innerHTML = segs.length
+    ? `<button type="button" data-crumb="root">根目录</button>${tail}`
+    : `<button type="button" data-crumb="root" aria-current="page">根目录（${count} 项）</button>`;
   glass.observe(crumbs);
 }
 
@@ -630,9 +758,14 @@ async function loadThumbs() {
 
 grid.addEventListener('click', (e) => {
   const t = e.target as HTMLElement;
-  const folder = t.closest<HTMLElement>('[data-group]');
+  const folder = t.closest<HTMLElement>('[data-group], [data-dir]');
   if (folder?.dataset.group) {
-    view = { name: 'folder', kind: folder.dataset.group as ItemKind, page: 0 };
+    view = { name: 'kind', kind: folder.dataset.group as ItemKind, page: 0 };
+    render();
+    return;
+  }
+  if (folder?.dataset.dir !== undefined) {
+    view = { name: 'dir', path: folder.dataset.dir, page: 0 };
     render();
     return;
   }
@@ -660,16 +793,17 @@ grid.addEventListener('change', (e) => {
 });
 
 crumbs.addEventListener('click', (e) => {
-  const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-crumb]');
-  if (btn?.dataset.crumb === 'root') {
-    view = { name: 'folders' };
-    render();
-  }
+  const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-crumb], [data-dir]');
+  if (!btn) return;
+  if (btn.dataset.dir) view = { name: 'dir', path: btn.dataset.dir, page: 0 };
+  else if (btn.dataset.crumb === 'root') view = rootView();
+  else return;
+  render();
 });
 
 pager.addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-page]');
-  if (!btn || btn.disabled || view.name !== 'folder') return;
+  if (!btn || btn.disabled || view.name === 'root') return;
   view = { ...view, page: Number(btn.dataset.page) };
   render();
 });
@@ -685,10 +819,16 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') return;
-  if (view.name === 'folder' && !isTyping(e.target)) {
-    view = { name: 'folders' };
-    render();
+  if (isTyping(e.target)) return;
+  // 左方向键退一层：目录模式退到上级目录，类型模式退回入口列表
+  if (view.name === 'kind') {
+    view = { name: 'root' };
+  } else if (view.name === 'dir' && view.path) {
+    view = { name: 'dir', path: parentDir(view.path), page: 0 };
+  } else {
+    return;
   }
+  render();
 });
 
 $<HTMLButtonElement>('#notice-ok').addEventListener('click', closeNotice);
@@ -900,7 +1040,7 @@ zipBtn.addEventListener('click', () => void zipItems(scopeItems()));
 selZip.addEventListener('click', () => void zipItems(selectedItems()));
 selDl.addEventListener('click', () => void downloadItems(selectedItems()));
 selClear.addEventListener('click', () => setMany(currentItems, false));
-selAll.addEventListener('click', () => setMany(scopeItemsToSelect(), true));
+selAll.addEventListener('click', () => setMany(selectScope().items, true));
 
 // —— 选项变化 ——
 function reparse() {
@@ -954,8 +1094,21 @@ for (const el of [optTex, animatedFormat]) {
   });
 }
 
+// 只是换个看法，条目本身没变：不用重新解析
+browseSelect.addEventListener('change', () => {
+  browse = browseSelect.value === 'dir' ? 'dir' : 'kind';
+  try {
+    localStorage.setItem(BROWSE_KEY, browse);
+  } catch {
+    /* 隐私模式忽略 */
+  }
+  view = rootView();
+  render();
+});
+
 // —— 启动 ——
 glass.observe(document.body);
 dock.start();
+browseSelect.value = browse;
 syncOptionVisibility();
 renderSelbar();
