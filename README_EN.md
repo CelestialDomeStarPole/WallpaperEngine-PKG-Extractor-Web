@@ -17,6 +17,7 @@ Parses Wallpaper Engine `.pkg` (desktop) / `.mpkg` (Android) wallpaper packages,
 - Animated textures (`.tex` with a frame table) are re-encoded into a single **APNG** (lossless, keeps alpha) or **GIF** (256 colours, small), or both; when a frame has ≤255 distinct colours the GIF uses an exact palette and is **pixel-for-pixel lossless** (true for most flat/vector-style wallpapers)
 - Multi-select cards: bulk download the selection, or ZIP it
 - Single file download / streaming ZIP export preserving directory structure
+- Switchable layout: **by file type** (images / videos / music / JSON / other) or **by package directory tree**, and the choice is remembered; in directory mode the breadcrumb is clickable level by level and ← goes up one level
 - Filtering (images/videos/JSON), `project.json` metadata card
 
 ## Development & Verification
